@@ -32,35 +32,46 @@ The binary will be at `target/release/infinishield`.
 ### Embed a Watermark
 
 ```bash
+# Minimal — uses default message, password, and intensity
+infinishield embed -i source.jpg -o output.png
+
+# Full — all parameters explicit
 infinishield embed \
   -i source.jpg \
-  -m "Copyright: Company_A" \
-  -p "MySecret123" \
+  -m "Copyright: InfiniLabs" \
+  -p "d1ng0" \
   -o output.png \
   --intensity 5
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-i` | Input image path (PNG or JPEG) |
-| `-m` | Message to embed |
-| `-p` | Password (used for scrambling and verification) |
-| `-o` | Output image path (PNG recommended) |
-| `--intensity` | Embedding strength, 1-10 (default: 5). Higher = more robust but slightly more visible |
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `-i, --input` | yes | — | Input image path (PNG or JPEG) |
+| `-o, --output` | yes | — | Output image path (PNG recommended) |
+| `-m, --message` | no | `"Copyright: InfiniLabs"` | Message to embed as watermark |
+| `-p, --password` | no | `"d1ng0"` | Password for scrambling and verification |
+| `--intensity` | no | `5` | Embedding strength (1-10). Higher = more robust but slightly more visible |
 
 ### Verify / Extract a Watermark
 
 ```bash
-infinishield verify \
-  -i suspicious_image.jpg \
-  -p "MySecret123"
+# Minimal — uses default password
+infinishield verify -i suspicious_image.jpg
+
+# With explicit password
+infinishield verify -i suspicious_image.jpg -p "d1ng0"
 ```
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `-i, --input` | yes | — | Input image path to verify |
+| `-p, --password` | no | `"d1ng0"` | Password used during embedding |
 
 Output on success:
 ```
 [分析中] 正在执行频域扫描...
 [验证结果] 匹配成功！(置信度: 64.7%)
-[提取内容] "Copyright: Company_A"
+[提取内容] "Copyright: InfiniLabs"
 ```
 
 Output on failure (no watermark or wrong password):
@@ -82,11 +93,11 @@ Capacity depends on image dimensions (with 16x16 blocks and 3x repetition ECC):
 ## Running Tests
 
 ```bash
-# Debug mode (unit tests only)
-cargo test --lib
-
-# Release mode (all tests)
-cargo test --release
+make test-unit         # Unit tests (debug)
+make test-integration  # Integration tests with real images (debug)
+make test              # All tests (debug)
+make test-release      # All tests (release)
+make sanity            # Full check: fmt + lint + build + all tests (debug & release)
 ```
 
 ## Current Limitations (v0.1)
