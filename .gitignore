@@ -1,0 +1,27 @@
+# Build artifacts
+/target
+
+# Editor files
+*.swp
+*.swo
+*~
+*.bak
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+CLAUDE.md
+ERROR.md
+
+# Test outputs
+/testing_output
+
+# Debug
+*.pdb
