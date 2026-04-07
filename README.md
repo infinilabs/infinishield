@@ -1,5 +1,7 @@
 # infinishield
 
+[![Build](https://github.com/infinilabs/infinishield/actions/workflows/build.yml/badge.svg)](https://github.com/infinilabs/infinishield/actions/workflows/build.yml)
+
 A command-line tool for embedding invisible, robust watermarks into images using frequency-domain techniques (DWT + SVD + QIM).
 
 ## How It Works
