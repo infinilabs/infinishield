@@ -96,6 +96,30 @@ fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
     }
 }
 
+/// Warn the user if the output format is lossy, which may degrade the watermark.
+fn warn_if_lossy_output(output_path: &str) {
+    let ext = Path::new(output_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "jpg" | "jpeg" => {
+            eprintln!("[警告] 输出格式为 JPEG (有损压缩)，水印可能被压缩降质。建议使用 PNG 格式。");
+        }
+        "webp" => {
+            eprintln!(
+                "[警告] 输出格式为 WebP，可能使用有损压缩，水印可能被降质。建议使用 PNG 格式。"
+            );
+        }
+        "gif" => {
+            eprintln!("[警告] 输出格式为 GIF (仅 256 色)，水印会严重降质。建议使用 PNG 格式。");
+        }
+        _ => {} // png, bmp, tiff — lossless, no warning
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -127,6 +151,9 @@ fn main() {
                 }
                 None => 0, // auto
             };
+
+            // Warn if output format is lossy
+            warn_if_lossy_output(&output);
 
             let engine = match engine_for_file(&input) {
                 Ok(e) => e,
