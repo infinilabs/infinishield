@@ -1,4 +1,4 @@
-pub mod dwt;
-pub mod ecc;
-pub mod scramble;
-pub mod watermark;
+pub mod common;
+pub mod raster;
+pub mod vector;
+pub mod video;

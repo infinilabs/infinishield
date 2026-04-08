@@ -4,7 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use infinishield::watermark;
+use infinishield::common::WatermarkEngine;
+use infinishield::raster::RasterEngine;
 
 const DEFAULT_MESSAGE: &str = "Copyright: InfiniLabs";
 const DEFAULT_PASSWORD: &str = "d1ng0";
@@ -39,14 +40,15 @@ fn assert_embed_verify(
 ) {
     let out = output_path(output_name);
 
-    let result = watermark::embed(
-        input.to_str().unwrap(),
-        message,
-        password,
-        intensity,
-        out.to_str().unwrap(),
-    )
-    .expect(&format!("embed failed for {}", input.display()));
+    let result = RasterEngine
+        .embed(
+            input.to_str().unwrap(),
+            message,
+            password,
+            intensity,
+            out.to_str().unwrap(),
+        )
+        .expect(&format!("embed failed for {}", input.display()));
 
     assert!(
         result.message.contains("成功"),
@@ -55,7 +57,8 @@ fn assert_embed_verify(
     );
     assert!(out.exists(), "Output file not created: {}", out.display());
 
-    let extract = watermark::verify(out.to_str().unwrap(), password)
+    let extract = RasterEngine
+        .verify(out.to_str().unwrap(), password)
         .expect(&format!("verify failed for {}", out.display()));
 
     assert!(
@@ -74,7 +77,8 @@ fn assert_embed_verify(
 
 /// Helper: verify that a wrong password does NOT extract the correct message.
 fn assert_wrong_password_fails(output: &Path, correct_message: &str) {
-    let result = watermark::verify(output.to_str().unwrap(), "totally_wrong_password_xyz")
+    let result = RasterEngine
+        .verify(output.to_str().unwrap(), "totally_wrong_password_xyz")
         .expect("verify call itself should not error");
 
     // Either not detected, or message doesn't match
@@ -108,14 +112,15 @@ fn test_png_coco_handdraw_wrong_password() {
     let input = input_dir().join("coco_handdraw.png");
     let out = output_path("coco_handdraw_wp.png");
 
-    watermark::embed(
-        input.to_str().unwrap(),
-        SHORT_MESSAGE,
-        DEFAULT_PASSWORD,
-        5,
-        out.to_str().unwrap(),
-    )
-    .unwrap();
+    RasterEngine
+        .embed(
+            input.to_str().unwrap(),
+            SHORT_MESSAGE,
+            DEFAULT_PASSWORD,
+            5,
+            out.to_str().unwrap(),
+        )
+        .unwrap();
 
     assert_wrong_password_fails(&out, SHORT_MESSAGE);
 }
@@ -204,7 +209,7 @@ fn test_message_too_long() {
     let out = output_path("coco_toolong.png");
     let long_msg = "This message is definitely way too long for a small image";
 
-    let result = watermark::embed(
+    let result = RasterEngine.embed(
         input.to_str().unwrap(),
         long_msg,
         DEFAULT_PASSWORD,
@@ -228,7 +233,9 @@ fn test_message_too_long() {
 fn test_verify_unwatermarked_image() {
     // Original image without any watermark
     let input = input_dir().join("abc.jpg");
-    let result = watermark::verify(input.to_str().unwrap(), DEFAULT_PASSWORD).unwrap();
+    let result = RasterEngine
+        .verify(input.to_str().unwrap(), DEFAULT_PASSWORD)
+        .unwrap();
 
     // Should either not detect, or detect garbage (not a valid message)
     if result.detected {
@@ -249,26 +256,28 @@ fn test_output_overwrite() {
     let out = output_path("abc_overwrite.png");
 
     // First embed with default password
-    watermark::embed(
-        input.to_str().unwrap(),
-        SHORT_MESSAGE,
-        DEFAULT_PASSWORD,
-        5,
-        out.to_str().unwrap(),
-    )
-    .unwrap();
+    RasterEngine
+        .embed(
+            input.to_str().unwrap(),
+            SHORT_MESSAGE,
+            DEFAULT_PASSWORD,
+            5,
+            out.to_str().unwrap(),
+        )
+        .unwrap();
 
     let meta1 = std::fs::metadata(&out).unwrap();
 
     // Second embed overwrites with a different password
-    watermark::embed(
-        input.to_str().unwrap(),
-        SHORT_MESSAGE,
-        "d1ng0_alt",
-        5,
-        out.to_str().unwrap(),
-    )
-    .unwrap();
+    RasterEngine
+        .embed(
+            input.to_str().unwrap(),
+            SHORT_MESSAGE,
+            "d1ng0_alt",
+            5,
+            out.to_str().unwrap(),
+        )
+        .unwrap();
 
     let meta2 = std::fs::metadata(&out).unwrap();
     assert!(
@@ -277,12 +286,16 @@ fn test_output_overwrite() {
     );
 
     // Verify with the second password
-    let result = watermark::verify(out.to_str().unwrap(), "d1ng0_alt").unwrap();
+    let result = RasterEngine
+        .verify(out.to_str().unwrap(), "d1ng0_alt")
+        .unwrap();
     assert!(result.detected);
     assert_eq!(result.message.as_deref(), Some(SHORT_MESSAGE));
 
     // First password should not extract the same message
-    let result = watermark::verify(out.to_str().unwrap(), DEFAULT_PASSWORD).unwrap();
+    let result = RasterEngine
+        .verify(out.to_str().unwrap(), DEFAULT_PASSWORD)
+        .unwrap();
     if result.detected {
         assert_ne!(result.message.as_deref(), Some(SHORT_MESSAGE));
     }

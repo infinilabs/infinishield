@@ -1,4 +1,8 @@
+use std::path::Path;
+
 use clap::{CommandFactory, Parser, Subcommand};
+use infinishield::common::WatermarkEngine;
+use infinishield::raster::RasterEngine;
 
 #[derive(Parser)]
 #[command(name = "infinishield")]
@@ -67,13 +71,36 @@ enum Commands {
     },
 }
 
+/// Detect file format and return the appropriate engine.
+///
+/// Routes by file extension (case-insensitive). Future engines (SVG, video)
+/// will be added here as they are implemented.
+fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "tif" | "gif" => {
+            Ok(Box::new(RasterEngine))
+        }
+        // "svg" => Ok(Box::new(VectorEngine)),       // Phase 2
+        // "mp4" | "webm" | "mov" | "avi" | "mkv" => Ok(Box::new(VideoEngine)), // Phase 3
+        _ => Err(format!(
+            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif",
+            ext
+        )),
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
-            // No subcommand provided — print full help and exit 0
             Cli::command().print_long_help().unwrap();
             println!();
             std::process::exit(0);
@@ -93,7 +120,15 @@ fn main() {
                 std::process::exit(1);
             }
 
-            match infinishield::watermark::embed(&input, &message, &password, intensity, &output) {
+            let engine = match engine_for_file(&input) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("[错误] {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match engine.embed(&input, &message, &password, intensity, &output) {
                 Ok(result) => {
                     println!("{}", result.message);
                 }
@@ -106,7 +141,15 @@ fn main() {
         Commands::Verify { input, password } => {
             println!("[分析中] 正在执行频域扫描...");
 
-            match infinishield::watermark::verify(&input, &password) {
+            let engine = match engine_for_file(&input) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("[错误] {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match engine.verify(&input, &password) {
                 Ok(result) => {
                     if result.detected {
                         println!(
