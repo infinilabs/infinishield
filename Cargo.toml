@@ -7,6 +7,7 @@ description = "Invisible robust watermarking system for multimedia files"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 image = "0.25"
+imageproc = "0.26.1"
 rand = "0.8"
 rand_chacha = "0.3"
 sha2 = "0.10"

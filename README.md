@@ -40,7 +40,7 @@ infinishield embed -i source.jpg -o output.png
 # Full — all parameters explicit
 infinishield embed \
   -i source.jpg \
-  -m "Copyright: InfiniLabs" \
+  -m "Infini" \
   -p "d1ng0" \
   -o output.png \
   --intensity 5
@@ -50,9 +50,9 @@ infinishield embed \
 |------|----------|---------|-------------|
 | `-i, --input` | yes | — | Input image path (PNG or JPEG) |
 | `-o, --output` | yes | — | Output image path (PNG recommended) |
-| `-m, --message` | no | `"Copyright: InfiniLabs"` | Message to embed as watermark |
+| `-m, --message` | no | `"Infini"` | Message to embed as watermark |
 | `-p, --password` | no | `"d1ng0"` | Password for scrambling and verification |
-| `--intensity` | no | `5` | Embedding strength (1-10). Higher = more robust but slightly more visible |
+| `--intensity` | no | auto | Embedding strength (1-10). Auto-selected from image size if omitted (smaller images → higher intensity) |
 
 ### Verify / Extract a Watermark
 
@@ -73,7 +73,7 @@ Output on success:
 ```
 [分析中] 正在执行频域扫描...
 [验证结果] 匹配成功！(置信度: 64.7%)
-[提取内容] "Copyright: InfiniLabs"
+[提取内容] "Infini"
 ```
 
 Output on failure (no watermark or wrong password):

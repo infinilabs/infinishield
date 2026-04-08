@@ -16,15 +16,17 @@ use infinishield::raster::RasterEngine;
     EXAMPLES:\n  \
     infinishield embed -i photo.jpg -o watermarked.png\n  \
     infinishield embed -i photo.jpg -m \"My Copyright\" -p secret -o out.png --intensity 8\n  \
+    infinishield embed -i photo.jpg -o out.png --dry-run\n  \
     infinishield verify -i watermarked.png\n  \
     infinishield verify -i watermarked.png -p secret\n\n\
     SUBCOMMANDS:\n\n  \
     embed   Embed a watermark into an image\n\n    \
       -i, --input <INPUT>          (required) Input image path (PNG, JPEG)\n    \
       -o, --output <OUTPUT>        (required) Output image path (PNG recommended)\n    \
-      -m, --message <MESSAGE>      Message to embed [default: \"Copyright: InfiniLabs\"]\n    \
+      -m, --message <MESSAGE>      Message to embed [default: \"Infini\"]\n    \
       -p, --password <PASSWORD>    Password for encryption [default: \"d1ng0\"]\n          \
-      --intensity <INTENSITY>  Embedding intensity 1-10 [default: 5]\n\n  \
+      --intensity <INTENSITY>  Embedding intensity 1-10 [default: auto]\n          \
+      --dry-run                Preview embedding without writing output\n\n  \
     verify  Verify and extract a watermark from an image\n\n    \
       -i, --input <INPUT>          (required) Input image path\n    \
       -p, --password <PASSWORD>    Password used during embedding [default: \"d1ng0\"]"
@@ -43,7 +45,7 @@ enum Commands {
         input: String,
 
         /// Message to embed as watermark
-        #[arg(short = 'm', long, default_value = "Copyright: InfiniLabs")]
+        #[arg(short = 'm', long, default_value = "Infini")]
         message: String,
 
         /// Password for watermark encryption
@@ -54,9 +56,13 @@ enum Commands {
         #[arg(short = 'o', long)]
         output: String,
 
-        /// Embedding intensity (1-10, higher = more robust but slightly more visible)
-        #[arg(long, default_value_t = 5)]
-        intensity: u8,
+        /// Embedding intensity (1-10). Auto-selected from image size if omitted
+        #[arg(long)]
+        intensity: Option<u8>,
+
+        /// Preview embedding info without writing the output file
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Verify and extract a watermark from an image
@@ -72,9 +78,6 @@ enum Commands {
 }
 
 /// Detect file format and return the appropriate engine.
-///
-/// Routes by file extension (case-insensitive). Future engines (SVG, video)
-/// will be added here as they are implemented.
 fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
     let ext = Path::new(path)
         .extension()
@@ -86,8 +89,6 @@ fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "tif" | "gif" => {
             Ok(Box::new(RasterEngine))
         }
-        // "svg" => Ok(Box::new(VectorEngine)),       // Phase 2
-        // "mp4" | "webm" | "mov" | "avi" | "mkv" => Ok(Box::new(VideoEngine)), // Phase 3
         _ => Err(format!(
             "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif",
             ext
@@ -114,11 +115,18 @@ fn main() {
             password,
             output,
             intensity,
+            dry_run,
         } => {
-            if !(1..=10).contains(&intensity) {
-                eprintln!("[错误] 强度参数必须在 1-10 之间。");
-                std::process::exit(1);
-            }
+            let intensity = match intensity {
+                Some(v) => {
+                    if !(1..=10).contains(&v) {
+                        eprintln!("[错误] 强度参数必须在 1-10 之间。");
+                        std::process::exit(1);
+                    }
+                    v
+                }
+                None => 0, // auto
+            };
 
             let engine = match engine_for_file(&input) {
                 Ok(e) => e,
@@ -128,13 +136,25 @@ fn main() {
                 }
             };
 
-            match engine.embed(&input, &message, &password, intensity, &output) {
-                Ok(result) => {
-                    println!("{}", result.message);
+            if dry_run {
+                match engine.dry_run(&input, &message, &password, intensity, &output) {
+                    Ok(info) => {
+                        println!("{}", info.dry_run_summary());
+                    }
+                    Err(e) => {
+                        eprintln!("[错误] {}", e);
+                        std::process::exit(1);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[错误] {}", e);
-                    std::process::exit(1);
+            } else {
+                match engine.embed(&input, &message, &password, intensity, &output) {
+                    Ok(result) => {
+                        println!("{}", result.message);
+                    }
+                    Err(e) => {
+                        eprintln!("[错误] {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
