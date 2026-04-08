@@ -18,8 +18,9 @@ build: debug release ## Build both debug and release
 test-unit: ## Run unit tests (debug)
 	cargo test --lib
 
-test-integration: ## Run integration tests with real images (debug)
+test-integration: ## Run integration tests with real images and SVGs (debug)
 	cargo test --test picture_tests
+	cargo test --test svg_tests
 
 test: test-unit test-integration ## Run all tests (debug)
 

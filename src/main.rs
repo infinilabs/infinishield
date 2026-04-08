@@ -3,6 +3,7 @@ use std::path::Path;
 use clap::{CommandFactory, Parser, Subcommand};
 use infinishield::common::WatermarkEngine;
 use infinishield::raster::RasterEngine;
+use infinishield::vector::VectorEngine;
 
 #[derive(Parser)]
 #[command(name = "infinishield")]
@@ -89,8 +90,9 @@ fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "tif" | "gif" => {
             Ok(Box::new(RasterEngine))
         }
+        "svg" => Ok(Box::new(VectorEngine)),
         _ => Err(format!(
-            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif",
+            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif, svg",
             ext
         )),
     }
