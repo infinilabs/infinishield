@@ -39,20 +39,28 @@ pub struct TempInputForInference {
     patch_buf: Vec<f64>,
     /// Maximum patch side length this context was allocated for.
     max_patch_size: usize,
-    /// Pre-allocated PN chip sequence buffer (COEFFS_PER_BLOCK elements).
+    /// Pre-allocated PN chip sequence buffer.
     pn_buf: Vec<f64>,
+    /// Number of coefficients per block (block_size²).
+    coeffs_per_block: usize,
     /// Seed for PN sequence generation (derived from password).
     seed: [u8; 32],
 }
 
 impl TempInputForInference {
-    /// Create a new inference buffer pre-allocated for patches up to
-    /// `max_patch_size × max_patch_size` pixels.
+    /// Create a new inference buffer with the default BLOCK_SIZE (16×16).
     pub fn new(max_patch_size: usize) -> Self {
+        Self::with_block_size(max_patch_size, BLOCK_SIZE)
+    }
+
+    /// Create a new inference buffer with a custom block size.
+    pub fn with_block_size(max_patch_size: usize, block_size: usize) -> Self {
+        let coeffs = block_size * block_size;
         Self {
             patch_buf: vec![0.0; max_patch_size * max_patch_size],
             max_patch_size,
-            pn_buf: vec![0.0; COEFFS_PER_BLOCK],
+            pn_buf: vec![0.0; coeffs],
+            coeffs_per_block: coeffs,
             seed: [0u8; 32],
         }
     }
@@ -81,10 +89,10 @@ impl TempInputForInference {
         block_seed.copy_from_slice(&block_seed_hash);
 
         let mut rng = ChaCha20Rng::from_seed(block_seed);
-        for v in self.pn_buf.iter_mut() {
+        for v in self.pn_buf.iter_mut().take(self.coeffs_per_block) {
             *v = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
         }
-        &self.pn_buf
+        &self.pn_buf[..self.coeffs_per_block]
     }
 
     /// Load a rectangular region from a 2D coefficient array into the patch buffer.
@@ -142,7 +150,7 @@ impl TempInputForInference {
 
     /// Get the PN buffer (read-only, from last `generate_pn_chip` call).
     pub fn pn_buffer(&self) -> &[f64] {
-        &self.pn_buf
+        &self.pn_buf[..self.coeffs_per_block]
     }
 
     /// Embed a single bit into BLOCK_SIZE×BLOCK_SIZE coefficients in the patch buffer
@@ -152,7 +160,7 @@ impl TempInputForInference {
     /// The PN chip must have been generated prior to calling this.
     pub fn embed_spread_spectrum(&mut self, offset: usize, bit: bool, alpha: f64) {
         let signal = if bit { 1.0 } else { -1.0 };
-        for i in 0..COEFFS_PER_BLOCK {
+        for i in 0..self.coeffs_per_block {
             self.patch_buf[offset + i] += alpha * self.pn_buf[i] * signal;
         }
     }
@@ -163,11 +171,11 @@ impl TempInputForInference {
     /// Returns `(bit, confidence)` where confidence is normalized correlation strength.
     pub fn extract_spread_spectrum(&self, offset: usize) -> (bool, f64) {
         let mut correlation = 0.0;
-        for i in 0..COEFFS_PER_BLOCK {
+        for i in 0..self.coeffs_per_block {
             correlation += self.patch_buf[offset + i] * self.pn_buf[i];
         }
         let bit = correlation >= 0.0;
-        let confidence = (correlation.abs() / COEFFS_PER_BLOCK as f64).min(1.0);
+        let confidence = (correlation.abs() / self.coeffs_per_block as f64).min(1.0);
         (bit, confidence)
     }
 }

@@ -138,9 +138,10 @@ make sanity            # Full check: fmt + lint + build + all tests (debug & rel
 
 ## Current Limitations
 
-- **Feature-point message limit** — cropping-resistant mode supports max 7-byte messages. Longer messages fall back to global DWT (no cropping resistance).
-- **Single channel** — watermark is embedded in the green channel; keypoints detected from the red channel (ensures stability across embed/extract).
-- **No rotation resistance** — cropping is handled; rotation and scaling are not (planned for future via patch rotation normalization).
+- **Short messages only for cropping resistance** — messages up to 7 bytes (e.g., "Infini") survive cropping. Longer messages (e.g., "Copyright: InfiniLabs") still work but lose cropping protection.
+- **No rotation or scaling resistance** — the watermark survives cropping and compression, but not if the image is rotated or resized.
+- **Raster images only** — JPEG, PNG, WebP, BMP, TIFF, GIF. SVG and video support is planned.
+- **Lossy output degrades watermark** — saving as JPEG or WebP compresses the watermark. PNG or BMP output is recommended. A warning is printed for lossy formats.
 
 ## Project Structure
 
