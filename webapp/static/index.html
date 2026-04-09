@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>infinishield</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--text-dim:#8b949e;--accent:#58a6ff;--accent-hover:#79c0ff;--success:#3fb950;--error:#f85149;--warning:#d29922;--font:system-ui,-apple-system,sans-serif;--mono:'SF Mono',Monaco,Consolas,monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.5}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+h1{font-size:1.5rem;font-weight:600;margin-bottom:4px}
+.subtitle{color:var(--text-dim);font-size:.85rem;margin-bottom:20px}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:24px}
+.tab{padding:10px 24px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent;transition:all .2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+label{display:block;color:var(--text-dim);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+input[type=text],input[type=password],select{width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.9rem;font-family:var(--font);outline:none;transition:border .2s}
+input:focus,select:focus{border-color:var(--accent)}
+.form-row{display:flex;gap:16px;margin-bottom:16px}
+.form-row>div{flex:1}
+.byte-count{color:var(--text-dim);font-size:.75rem;margin-top:2px}
+.upload-zone{border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:16px}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(88,166,255,.05)}
+.upload-zone input{display:none}
+.upload-info{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:16px;font-size:.85rem}
+.btn{padding:10px 24px;border:none;border-radius:6px;cursor:pointer;font-size:.9rem;font-weight:500;transition:all .2s}
+.btn-primary{background:var(--accent);color:#0d1117}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+.output-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-top:16px;font-family:var(--mono);font-size:.8rem;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;color:var(--text-dim)}
+.output-panel.has-content{color:var(--text)}
+.indicator{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.indicator.idle{background:var(--text-dim)}
+.indicator.running{background:var(--warning);animation:pulse 1s infinite}
+.indicator.success{background:var(--success)}
+.indicator.error{background:var(--error)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+.comparison-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.comparison-panel h3{padding:8px 12px;font-size:.8rem;color:var(--text-dim);border-bottom:1px solid var(--border)}
+.comparison-panel img,.comparison-panel video{width:100%;display:block}
+.locked{position:relative;pointer-events:none;opacity:.6}
+.asset-preview{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px;max-height:400px}
+.asset-preview img{max-width:100%;max-height:380px;display:block;margin:0 auto}
+.asset-preview video{width:100%;max-height:380px;display:block}
+.toggle-pw{cursor:pointer;font-size:.75rem;opacity:.6;margin-left:4px;user-select:none}
+.toggle-pw:hover{opacity:1}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>infinishield</h1>
+<p class="subtitle">Invisible watermarking testing interface</p>
+
+<div class="tabs">
+  <div class="tab active" data-tab="embed">Embed</div>
+  <div class="tab" data-tab="verify">Verify</div>
+</div>
+
+<!-- EMBED TAB -->
+<div id="embed" class="tab-content active">
+  <div id="embed-form">
+    <div class="upload-zone" id="embed-upload-zone">
+      <input type="file" id="embed-file" accept="image/*,.svg,.mp4,.webm,.mov,.avi,.mkv">
+      <p>Drop a file here or <span style="color:var(--accent)">click to browse</span></p>
+      <p style="color:var(--text-dim);font-size:.75rem;margin-top:4px">Images, SVG, or Video</p>
+    </div>
+    <div id="embed-upload-info" class="upload-info" style="display:none"></div>
+    <div id="embed-preview" class="asset-preview" style="display:none"></div>
+
+    <div class="form-row">
+      <div>
+        <label>Message</label>
+        <input type="text" id="embed-message" value="Infini" placeholder="Watermark message">
+        <div class="byte-count" id="embed-bytes">6 bytes</div>
+      </div>
+      <div>
+        <label>Password <span class="toggle-pw" data-target="embed-password" title="Toggle visibility">👁</span></label>
+        <input type="text" id="embed-password" value="d1ng0" placeholder="Password">
+      </div>
+      <div>
+        <label>Intensity</label>
+        <select id="embed-intensity">
+          <option value="auto" selected>Auto</option>
+          <option value="1">1 (low)</option><option value="2">2</option><option value="3">3</option>
+          <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+          <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+          <option value="10">10 (high)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <span class="indicator idle" id="dryrun-indicator"></span>
+      <span style="color:var(--text-dim);font-size:.8rem" id="dryrun-label">Dry-run idle</span>
+    </div>
+    <div class="output-panel" id="dryrun-output">Upload a file to see dry-run preview</div>
+
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" id="embed-btn" disabled>Embed Watermark</button>
+    </div>
+  </div>
+
+  <div id="embed-result" style="display:none">
+    <div class="output-panel has-content" id="embed-output"></div>
+    <div class="comparison" id="embed-comparison"></div>
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" id="reset-btn">New Embed</button>
+    </div>
+  </div>
+</div>
+
+<!-- VERIFY TAB -->
+<div id="verify" class="tab-content">
+  <div class="upload-zone" id="verify-upload-zone">
+    <input type="file" id="verify-file" accept="image/*,.svg,.mp4,.webm,.mov,.avi,.mkv">
+    <p>Drop a watermarked file here or <span style="color:var(--accent)">click to browse</span></p>
+  </div>
+  <div id="verify-upload-info" class="upload-info" style="display:none"></div>
+
+  <div class="form-row">
+    <div>
+      <label>Password <span class="toggle-pw" data-target="verify-password" title="Toggle visibility">👁</span></label>
+      <input type="text" id="verify-password" value="d1ng0" placeholder="Password used during embedding">
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="verify-btn" disabled>Verify</button>
+  <div class="output-panel" id="verify-output" style="margin-top:16px">Upload a file to verify</div>
+</div>
+</div>
+
+<script>
+// ── State ──
+let embedFilePath = null;
+let embedFileName = null;
+let verifyFilePath = null;
+let dryRunTimer = null;
+let dryRunPending = false;
+let dryRunInProgress = false;
+
+// ── Password toggle ──
+document.querySelectorAll('.toggle-pw').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.target);
+    if (input.type === 'password') {
+      input.type = 'text';
+      btn.textContent = '🔒';
+    } else {
+      input.type = 'password';
+      btn.textContent = '👁';
+    }
+  });
+});
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Upload helper ──
+function setupUpload(zoneId, fileId, infoId, onUpload) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(fileId);
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      input.dispatchEvent(new Event('change'));
+    }
+  });
+
+  input.addEventListener('change', async () => {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    const form = new FormData();
+    form.append('file', file);
+
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await res.json();
+
+    const info = document.getElementById(infoId);
+    info.style.display = 'block';
+    info.textContent = data.filename + ' | Type: ' + data.type + ' | Size: ' + (data.size/1024).toFixed(1) + ' KB';
+
+    onUpload(data);
+  });
+}
+
+setupUpload('embed-upload-zone', 'embed-file', 'embed-upload-info', (data) => {
+  embedFilePath = data.path;
+  embedFileName = data.filename;
+  document.getElementById('embed-btn').disabled = false;
+
+  // Show original asset preview
+  const preview = document.getElementById('embed-preview');
+  preview.style.display = 'block';
+  preview.textContent = '';
+  const url = '/uploads/' + encodeURIComponent(data.filename);
+  if (data.type === 'video') {
+    const v = document.createElement('video');
+    v.controls = true;
+    v.src = url;
+    preview.appendChild(v);
+  } else {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = data.filename;
+    preview.appendChild(img);
+  }
+
+  triggerDryRun();
+});
+
+setupUpload('verify-upload-zone', 'verify-file', 'verify-upload-info', (data) => {
+  verifyFilePath = data.path;
+  document.getElementById('verify-btn').disabled = false;
+});
+
+// ── Message byte counter ──
+const msgInput = document.getElementById('embed-message');
+const bytesLabel = document.getElementById('embed-bytes');
+msgInput.addEventListener('input', () => {
+  const len = new TextEncoder().encode(msgInput.value).length;
+  bytesLabel.textContent = len + ' bytes';
+  scheduleDryRun();
+});
+
+// ── Dry-run triggers ──
+document.getElementById('embed-password').addEventListener('input', () => scheduleDryRun());
+document.getElementById('embed-intensity').addEventListener('change', () => scheduleDryRun());
+
+function scheduleDryRun() {
+  clearTimeout(dryRunTimer);
+  dryRunTimer = setTimeout(() => triggerDryRun(), 800);
+}
+
+async function triggerDryRun() {
+  if (!embedFilePath) return;
+  if (dryRunInProgress) { dryRunPending = true; return; }
+
+  dryRunInProgress = true;
+  setIndicator('running', 'Running dry-run...');
+
+  const body = {
+    input_path: embedFilePath,
+    message: document.getElementById('embed-message').value,
+    password: document.getElementById('embed-password').value,
+    intensity: document.getElementById('embed-intensity').value,
+  };
+
+  try {
+    const res = await fetch('/api/dryrun', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    const out = document.getElementById('dryrun-output');
+    out.textContent = data.output || data.error || 'No output';
+    out.classList.toggle('has-content', data.success);
+    setIndicator(data.success ? 'success' : 'error', data.success ? 'Dry-run complete' : 'Dry-run failed');
+  } catch (e) {
+    setIndicator('error', 'Dry-run error');
+  }
+
+  dryRunInProgress = false;
+  if (dryRunPending) {
+    dryRunPending = false;
+    triggerDryRun();
+  }
+}
+
+function setIndicator(state, label) {
+  document.getElementById('dryrun-indicator').className = 'indicator ' + state;
+  document.getElementById('dryrun-label').textContent = label;
+}
+
+// ── Embed ──
+document.getElementById('embed-btn').addEventListener('click', async () => {
+  const form = document.getElementById('embed-form');
+  form.classList.add('locked');
+
+  const ext = embedFileName.includes('.') ? embedFileName.split('.').pop().toLowerCase() : 'png';
+  const videoExts = ['mp4','webm','mov','avi','mkv'];
+  const outExt = ext === 'svg' ? 'svg' : videoExts.includes(ext) ? 'mp4' : 'png';
+  const outName = 'wm_' + Date.now() + '.' + outExt;
+
+  const body = {
+    input_path: embedFilePath,
+    message: document.getElementById('embed-message').value,
+    password: document.getElementById('embed-password').value,
+    intensity: document.getElementById('embed-intensity').value,
+    output_name: outName,
+  };
+
+  try {
+    const res = await fetch('/api/embed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    form.classList.remove('locked');
+    form.style.display = 'none';
+    document.getElementById('embed-result').style.display = 'block';
+    document.getElementById('embed-output').textContent = data.output || data.error;
+
+    // Show comparison using safe DOM methods
+    const comp = document.getElementById('embed-comparison');
+    comp.textContent = ''; // clear
+    const originalURL = '/uploads/' + encodeURIComponent(embedFileName);
+    const outputURL = data.output_url || '';
+
+    function makePanel(title, url, isVideo) {
+      const panel = document.createElement('div');
+      panel.className = 'comparison-panel';
+      const h3 = document.createElement('h3');
+      h3.textContent = title;
+      panel.appendChild(h3);
+      if (isVideo) {
+        const v = document.createElement('video');
+        v.controls = true;
+        v.src = url;
+        panel.appendChild(v);
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        panel.appendChild(img);
+      }
+      return panel;
+    }
+
+    const isVideo = videoExts.includes(ext);
+    comp.appendChild(makePanel('Original', originalURL, isVideo));
+    comp.appendChild(makePanel('Watermarked', outputURL, isVideo));
+  } catch (e) {
+    form.classList.remove('locked');
+    document.getElementById('dryrun-output').textContent = 'Embed failed: ' + e.message;
+  }
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  document.getElementById('embed-form').style.display = 'block';
+  document.getElementById('embed-result').style.display = 'none';
+  document.getElementById('embed-comparison').textContent = '';
+  document.getElementById('embed-preview').style.display = 'none';
+  document.getElementById('embed-preview').textContent = '';
+  document.getElementById('embed-upload-info').style.display = 'none';
+  document.getElementById('embed-btn').disabled = true;
+  embedFilePath = null;
+  embedFileName = null;
+});
+
+// ── Verify ──
+document.getElementById('verify-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('verify-btn');
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  const body = {
+    input_path: verifyFilePath,
+    password: document.getElementById('verify-password').value,
+  };
+
+  try {
+    const res = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    const out = document.getElementById('verify-output');
+    out.textContent = data.output || data.error || 'No output';
+    out.classList.toggle('has-content', data.success);
+  } catch (e) {
+    document.getElementById('verify-output').textContent = 'Error: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Verify';
+});
+</script>
+</body>
+</html>

@@ -23,5 +23,10 @@ ERROR.md
 # Test outputs
 /testing_output
 
+# Webapp runtime data
+/webapp/uploads
+/webapp/outputs
+/webapp/logs
+
 # Debug
 *.pdb

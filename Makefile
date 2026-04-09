@@ -1,4 +1,4 @@
-.PHONY: all build debug release debug-video release-video test test-unit test-integration test-video test-release sanity clean fmt lint check help
+.PHONY: all build debug release debug-video release-video test test-unit test-integration test-video test-release sanity clean fmt lint check help build-webapp webapp
 
 # Default target
 all: debug
@@ -58,6 +58,15 @@ sanity: fmt-check lint debug test-unit test-integration release test-release deb
 	@echo "========================================="
 	@echo " All sanity checks passed."
 	@echo "========================================="
+
+# ── Web App ───────────────────────────────────────────────────────────────
+
+build-webapp: release ## Build webapp server binary + infinishield release binary
+	go build -o target/release/infinishield-webapp webapp/main.go
+
+webapp: build-webapp ## Run webapp on port 1983
+	@echo "Starting infinishield webapp on http://localhost:1983"
+	cd $(CURDIR) && target/release/infinishield-webapp
 
 # ── Clean ─────────────────────────────────────────────────────────────────
 
