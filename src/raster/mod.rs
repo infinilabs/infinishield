@@ -108,7 +108,8 @@ impl WatermarkEngine for RasterEngine {
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
 
         if use_fp {
-            embed_feature_point(&img, &kps, message, password, ri, output_path)?;
+            // Pass raw intensity (0=auto) so fp_alpha uses smooth log curve
+            embed_feature_point(&img, &kps, message, password, intensity, output_path)?;
         } else {
             embed_global_dwt(&img, message, password, ri, output_path)?;
         }
@@ -171,7 +172,8 @@ impl RasterEngine {
         password: &str,
         intensity: u8,
     ) -> Result<(), String> {
-        let intensity = resolve_intensity(intensity, width, height);
+        let raw_intensity = intensity; // preserve for fp_alpha (0 = auto)
+        let resolved = resolve_intensity(intensity, width, height);
         let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
         let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
@@ -180,7 +182,7 @@ impl RasterEngine {
 
         if use_fp {
             let mut ch = channel;
-            let alpha = fp_alpha(intensity, width, height);
+            let alpha = fp_alpha(raw_intensity, width, height);
             let encoded_bits = fp_encode(message.as_bytes())?;
             let seed = password::password_to_seed(password);
             let perm = scramble::generate_permutation(encoded_bits.len(), &seed);
@@ -226,7 +228,7 @@ impl RasterEngine {
             let seed = password::password_to_seed(password);
             let perm = scramble::generate_permutation(bits.len(), &seed);
             let scrambled = scramble::scramble(&bits, &perm);
-            let alpha = intensity_to_alpha(intensity);
+            let alpha = intensity_to_alpha(resolved);
             let mut ctx = TempInputForInference::new(GLOBAL_BLOCK_SIZE);
             ctx.set_seed(seed);
             for (i, &bit) in scrambled.iter().enumerate() {
@@ -673,14 +675,36 @@ fn intensity_to_alpha(i: u8) -> f64 {
     0.5 + (i as f64 - 1.0) * 0.5
 }
 
-/// Feature-point alpha. Pixel-domain spread spectrum with mean-centered
-/// correlation needs higher alpha than DWT-domain (which has zero-mean HL).
-/// Floor scales with image size: small images tolerate less modification
-/// (every pixel counts visually), large images can absorb more.
-fn fp_alpha(i: u8, w: u32, h: u32) -> f64 {
+/// Feature-point alpha using a smooth logarithmic curve.
+///
+/// For auto mode (raw_intensity == 0):
+///   alpha = 6.5 + 1.44 * ln(mp), clamped to [4.0, 10.0]
+///   Smooth curve: 0.25 MP → 4.5, 1 MP → 6.5, 2 MP → 7.5, 8 MP → 9.5
+///
+/// For manual mode (raw_intensity 1-10):
+///   Scales the log curve by a multiplier mapped from intensity:
+///   multiplier = 0.5 + (intensity - 1) * (1.5 / 9), range [0.5, 2.0]
+///   alpha = log_alpha * multiplier, clamped to [1.0, 25.0]
+///
+/// The log curve is grounded in spread-spectrum theory: SNR improves with
+/// sqrt(N) where N is pixels per keypoint region. Larger images have more
+/// pixels to spread over, so they tolerate (and need) higher alpha. Small
+/// images need lower alpha because each pixel modification is more visible.
+fn fp_alpha(raw_intensity: u8, w: u32, h: u32) -> f64 {
     let mp = (w as f64 * h as f64) / 1_000_000.0;
-    let floor = if mp < 1.0 { 4.0 } else { 8.0 };
-    (intensity_to_alpha(i) * 4.0).max(floor)
+    let mp = mp.max(0.1);
+
+    // Logarithmic base: anchored at 2 MP → 7.5
+    let log_alpha = (6.5 + 1.44 * mp.ln()).clamp(4.0, 10.0);
+
+    if raw_intensity == 0 {
+        log_alpha
+    } else {
+        // Manual: map intensity 1..10 to a relative multiplier 0.5 .. 2.0
+        // This ensures the HVS log curve scales safely for any image size.
+        let multiplier = 0.5 + (raw_intensity as f64 - 1.0) * (1.5 / 9.0);
+        (log_alpha * multiplier).clamp(1.0, 25.0)
+    }
 }
 
 fn extract_channel(img: &DynamicImage) -> Vec<Vec<f64>> {

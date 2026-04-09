@@ -60,16 +60,40 @@ The raster engine automatically selects between two modes:
 
 ### Auto Intensity
 
-The auto-intensity system balances watermark invisibility against extraction reliability. The `fp_alpha` floor adapts to image size: small images use a lower floor (4.0) because every pixel modification is more visible, while large images use a higher floor (8.0) to ensure reliable extraction across more area. With 200 keypoints doing inter-patch majority voting, small images can afford lower per-pixel alpha without sacrificing detection confidence.
+The feature-point embedding strength (`fp_alpha`) uses a **smooth logarithmic curve** based on image megapixels, grounded in spread-spectrum theory: SNR improves with sqrt(N) where N is pixels per keypoint region, so larger images can absorb more perturbation while remaining visually imperceptible.
 
-| Image Size | Auto Intensity | fp_alpha floor | Effective fp_alpha |
-|-----------|:--------------:|:--------------:|:------------------:|
-| < 0.5 MP | 3 | 4.0 | max(1.5×4, 4) = 6.0 |
-| 0.5–2 MP | 4 | 4.0 | max(2.0×4, 4) = 8.0 |
-| 2–8 MP | 5 | 8.0 | max(2.5×4, 8) = 10.0 |
-| > 8 MP | 4 | 8.0 | max(2.0×4, 8) = 8.0 |
+**Auto mode** (`--intensity` omitted or 0):
 
-The `fp_alpha` floor threshold is 1.0 megapixels: images below 1 MP get floor=4.0, images at or above get floor=8.0. Users can override auto-intensity with `--intensity 1..10`; the floor still applies based on image size.
+```
+fp_alpha = 6.5 + 1.44 × ln(megapixels),  clamped to [4.0, 10.0]
+```
+
+| Image Size | Megapixels | fp_alpha |
+|-----------|:----------:|:--------:|
+| 526×524 | 0.28 | 4.7 |
+| 700×496 | 0.35 | 5.0 |
+| 1024×768 | 0.79 | 6.2 |
+| 1920×1080 | 2.07 | 7.5 |
+| 1832×4016 | 7.36 | 9.4 |
+| 3840×2160 | 8.29 | 9.5 |
+| 7680×4320 | 33.2 | 10.0 |
+
+**Manual mode** (`--intensity 1..10`): scales the auto log curve by a multiplier derived from intensity:
+
+```
+multiplier = 0.5 + (intensity − 1) × (1.5 / 9),  range [0.5, 2.0]
+fp_alpha   = log_alpha × multiplier,               clamped to [1.0, 25.0]
+```
+
+| Intensity | Multiplier | 0.28 MP (α=4.7) | 2 MP (α=7.5) | 8 MP (α=9.5) |
+|:---------:|:----------:|:----------------:|:-------------:|:-------------:|
+| 1 | 0.50× | 2.4 | 3.8 | 4.8 |
+| 5 | 1.17× | 5.5 | 8.8 | 11.1 |
+| 10 | 2.00× | 9.4 | 15.0 | 19.0 |
+
+This keeps manual intensity size-aware: the same intensity value produces proportionally less perturbation on small images and more on large ones, matching human visual sensitivity. Intensity ~5 approximates auto; intensity 1 halves the auto value for maximum subtlety at the cost of extraction reliability; intensity 10 doubles it for maximum robustness.
+
+The log curve replaced an earlier discrete 4-step mapping that caused visible noise on small images (< 1 MP) by assigning them disproportionately high alpha values (e.g., 14.0 for a 0.3 MP image vs. 4.7 with the log curve).
 
 ### Why Pixel-Domain Instead of DWT-on-Patch
 

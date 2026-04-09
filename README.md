@@ -58,8 +58,10 @@ infinishield embed -i photo.jpg -o out.png --dry-run                    # previe
 | `-o` | yes | — | Output file |
 | `-m` | no | `"Infini"` | Message to embed |
 | `-p` | no | `"d1ng0"` | Password |
-| `--intensity` | no | auto | Strength 1-10 (images only) |
+| `--intensity` | no | auto | Strength 1-10 (images only, see below) |
 | `--dry-run` | no | — | Preview without writing |
+
+**Intensity:** When omitted, infinishield automatically selects optimal strength using a logarithmic curve based on image size — smaller images get lighter watermarks to stay invisible, larger images get stronger ones. When set manually (`--intensity 1..10`), your value scales the auto curve (1 = 50%, 5 = ~auto, 10 = 200%), so the watermark remains size-aware.
 
 ### Verify
 
@@ -80,8 +82,9 @@ infinishield --version    # version
 **Images (JPEG/PNG):**
 - Use PNG output (`-o out.png`) for best watermark preservation. JPEG output is lossy and degrades the watermark.
 - Messages up to 7 bytes (e.g., `"Infini"`) survive cropping. For longer messages, cropping protection is lost.
-- Images should be at least 512×512 pixels. Larger images work better.
+- Images should be at least 512×512 pixels. Larger images produce better results with less visible impact.
 - Rotation and resizing will destroy the watermark — only cropping and compression are tolerated.
+- Auto intensity adapts to image size: small images (~0.3 MP) get subtle embedding, large images (8+ MP) get stronger embedding. Override with `--intensity` if needed.
 
 **SVG:**
 - Works best on SVGs with complex paths (illustrations, icons with curves). Simple geometric shapes (plain rectangles, circles) have too few coordinates to embed.
@@ -117,6 +120,50 @@ make test       # Images + SVG tests
 make sanity     # Full check: format + lint + build + all tests (including video)
 make clean      # Remove build artifacts
 ```
+
+## Troubleshooting
+
+### Visible noise or artifacts after embedding
+
+The watermark modifies pixel values in the green channel. On some images — especially small ones or images with large flat/uniform areas (sky, solid backgrounds, simple illustrations) — this can produce faint visible noise.
+
+**Try these steps in order:**
+
+1. **Use a lower intensity.** The default auto mode is tuned for a good balance, but you can reduce it:
+   ```bash
+   infinishield embed -i photo.jpg -o out.png --intensity 3
+   infinishield embed -i photo.jpg -o out.png --intensity 1   # minimum strength
+   ```
+   Lower intensity = less visible noise but weaker watermark. Use `--dry-run` to preview before committing.
+
+2. **Use a larger source image.** The watermark is spread across more pixels in larger images, making it less visible per pixel. If possible, watermark the full-resolution original rather than a resized thumbnail. Images under 512×512 pixels are not recommended.
+
+3. **Check the output format.** Always use PNG output (`-o out.png`). JPEG re-encodes with lossy compression, which can amplify watermark artifacts. The input can be any supported format.
+
+4. **Try `--dry-run` first.** Preview the embedding parameters without writing a file:
+   ```bash
+   infinishield embed -i photo.jpg -o out.png --dry-run
+   ```
+   This shows the mode, intensity, keypoint count, and capacity — useful for understanding what the tool will do.
+
+5. **Understand the image characteristics.** Watermarks are naturally less visible in textured, detailed areas (landscapes, photographs) and more visible in flat, uniform areas (logos, line art, solid backgrounds). This is inherent to all spatial-domain watermarking.
+
+### Watermark not detected after cropping
+
+- Only messages up to **7 bytes** support cropping resistance (feature-point mode). Longer messages use global DWT mode, which has no cropping resistance.
+- Cropping must preserve enough keypoint regions. Very aggressive cropping (> 75%) may remove too many feature points.
+- Resizing or rotating the image **will** destroy the watermark — only cropping and compression are tolerated.
+
+### Wrong message extracted
+
+- Make sure you use the same password for embed and verify (`-p` flag).
+- Very low intensity (`--intensity 1`) on large images may cause occasional bit errors. Use a higher intensity or auto mode for reliable extraction.
+- JPEG output degrades the watermark. Always verify from the PNG output, not a re-encoded JPEG.
+
+### Video watermark issues
+
+- Video re-encodes with H.264 (CRF 18). On complex scenes, 1-2 bits may flip — detection is reliable but exact byte recovery is not always guaranteed.
+- If verifying a trimmed video, ensure at least some watermarked keyframes remain. Keyframes are watermarked at 1 per second.
 
 ## Documentation
 
