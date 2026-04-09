@@ -95,6 +95,21 @@ infinishield --version    # version
 - Streaming architecture — only 1-2 frames in memory at a time. Handles videos of any length.
 - The video binary includes a statically linked FFmpeg — no runtime dependencies needed.
 
+## Web UI
+
+A browser-based testing interface for embedding and verifying watermarks. Requires [Go](https://go.dev/) 1.21+.
+
+```bash
+make webapp     # Build + run on http://localhost:1983
+```
+
+Features:
+- Upload images, SVGs, or videos for watermarking
+- Configure message, password, and intensity with real-time dry-run preview
+- Side-by-side comparison of original vs watermarked assets
+- Verify tab for extracting watermarks from files
+- Event logging to `webapp/logs/`
+
 ## Running Tests
 
 ```bash
