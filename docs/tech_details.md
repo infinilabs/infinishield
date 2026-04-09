@@ -52,6 +52,25 @@ The raster engine automatically selects between two modes:
 - Same bits at every keypoint → inter-patch majority voting (Level 2 ECC)
 - Cropping resistance: surviving keypoints still carry the full message
 
+### Local Perceptual Masking (NVF)
+
+To achieve maximum invisibility, the feature-point mode applies a **Local Variance Masking** technique based on the Noise Visibility Function (NVF). This ensures that watermarks are attenuated in flat, uniform areas (where noise is highly visible) and boosted in textured areas (where noise is masked by image detail).
+
+**The Mathematical Model:**
+For each 8×8 pixel block, we calculate the local variance ($\sigma^2$) and compute the NVF:
+```
+NVF = 1 / (1 + θ × σ²)  where θ = 0.01
+```
+The local embedding strength is then scaled by a multiplier derived from the NVF:
+```
+multiplier = 1.25 - 0.5 × NVF  (Range: 0.75 to 1.25)
+```
+*   **Flat areas (Sky, backgrounds):** $\sigma^2 \approx 0 \implies NVF \approx 1 \implies \alpha_{local} = 0.75 \times \alpha_{global}$. Watermark noise is reduced by 25% to stay invisible.
+*   **Textured areas (Trees, fabric):** $\sigma^2 \gg 0 \implies NVF \approx 0 \implies \alpha_{local} = 1.25 \times \alpha_{global}$. Watermark power is boosted by 25% for extreme robustness.
+
+**Performance Optimization:**
+The local variance is calculated in a single pass using the mathematical identity $Var(X) = E[X^2] - (E[X])^2$. This eliminates redundant pixel iterations and ensures optimal performance in the high-speed video streaming pipeline.
+
 **Global DWT Mode** (messages > 7 bytes):
 - 1-level Haar DWT on the full green channel
 - Spread spectrum in the HL (vertical detail) subband

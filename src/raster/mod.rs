@@ -204,13 +204,16 @@ impl RasterEngine {
                     let signal = if bit { 1.0 } else { -1.0 };
                     ctx.generate_pn_chip(bit_idx);
                     let pn = ctx.pn_buffer().to_vec();
+
+                    let local_alpha = calculate_local_alpha(&ch, ky, kx, br, bc, ch_h, ch_w, alpha);
+
                     for i in 0..FP_BLOCK_SIZE {
                         for j in 0..FP_BLOCK_SIZE {
                             let py = ky - half + (br * FP_BLOCK_SIZE + i) as i64;
                             let px = kx - half + (bc * FP_BLOCK_SIZE + j) as i64;
                             if py >= 0 && px >= 0 && (py as usize) < ch_h && (px as usize) < ch_w {
                                 ch[py as usize][px as usize] +=
-                                    alpha * pn[i * FP_BLOCK_SIZE + j] * signal;
+                                    local_alpha * pn[i * FP_BLOCK_SIZE + j] * signal;
                             }
                         }
                     }
@@ -324,6 +327,53 @@ fn write_channel_to_rgb(rgb: &mut [u8], ch: &[Vec<f64>], w: u32, h: u32, ch_idx:
 //      isolate watermark from host pixel values)
 //   4. Level 2 ECC: majority vote across all keypoints
 
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn calculate_local_alpha(
+    channel: &[Vec<f64>],
+    ky: i64,
+    kx: i64,
+    br: usize,
+    bc: usize,
+    ch_h: usize,
+    ch_w: usize,
+    global_alpha: f64,
+) -> f64 {
+    let half = (PATCH_SIZE / 2) as i64;
+    let mut sum = 0.0;
+    let mut sq_sum = 0.0;
+    let mut count = 0;
+
+    for i in 0..FP_BLOCK_SIZE {
+        for j in 0..FP_BLOCK_SIZE {
+            let py = ky - half + (br * FP_BLOCK_SIZE + i) as i64;
+            let px = kx - half + (bc * FP_BLOCK_SIZE + j) as i64;
+            if py >= 0 && px >= 0 && (py as usize) < ch_h && (px as usize) < ch_w {
+                let val = channel[py as usize][px as usize];
+                sum += val;
+                sq_sum += val * val;
+                count += 1;
+            }
+        }
+    }
+
+    if count == 0 {
+        return global_alpha;
+    }
+
+    let mean = sum / count as f64;
+    // Var(X) = E[X^2] - (E[X])^2
+    // Use .max(0.0) to avoid negative variance from floating point inaccuracies
+    let variance = (sq_sum / count as f64 - mean * mean).max(0.0);
+
+    // NVF formula: 1 / (1 + theta * sigma^2). Theta = 0.01 provides a good curve.
+    let nvf = 1.0 / (1.0 + 0.01 * variance);
+    // Map NVF [0, 1] to Multiplier [1.25, 0.75] to preserve robustness while masking
+    let multiplier = 1.25 - 0.5 * nvf;
+
+    global_alpha * multiplier
+}
+
 fn fp_encode(message: &[u8]) -> Result<Vec<bool>, String> {
     if message.len() > FP_MAX_MESSAGE {
         return Err(format!(
@@ -409,13 +459,15 @@ fn embed_feature_point(
             ctx.generate_pn_chip(bit_idx);
             let pn = ctx.pn_buffer().to_vec();
 
+            let local_alpha = calculate_local_alpha(&channel, ky, kx, br, bc, ch_h, ch_w, alpha);
+
             for i in 0..FP_BLOCK_SIZE {
                 for j in 0..FP_BLOCK_SIZE {
                     let py = ky - half + (br * FP_BLOCK_SIZE + i) as i64;
                     let px = kx - half + (bc * FP_BLOCK_SIZE + j) as i64;
                     if py >= 0 && px >= 0 && (py as usize) < ch_h && (px as usize) < ch_w {
                         channel[py as usize][px as usize] +=
-                            alpha * pn[i * FP_BLOCK_SIZE + j] * signal;
+                            local_alpha * pn[i * FP_BLOCK_SIZE + j] * signal;
                     }
                 }
             }
