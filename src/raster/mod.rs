@@ -180,7 +180,7 @@ impl RasterEngine {
 
         if use_fp {
             let mut ch = channel;
-            let alpha = fp_alpha(intensity);
+            let alpha = fp_alpha(intensity, width, height);
             let encoded_bits = fp_encode(message.as_bytes())?;
             let seed = password::password_to_seed(password);
             let perm = scramble::generate_permutation(encoded_bits.len(), &seed);
@@ -376,8 +376,8 @@ fn embed_feature_point(
     intensity: u8,
     output_path: &str,
 ) -> Result<(), String> {
-    let alpha = fp_alpha(intensity);
     let (width, height) = img.dimensions();
+    let alpha = fp_alpha(intensity, width, height);
 
     let encoded_bits = fp_encode(message.as_bytes())?;
     let seed = password::password_to_seed(password);
@@ -651,13 +651,13 @@ fn no_detection() -> ExtractResult {
 fn auto_intensity(w: u32, h: u32) -> u8 {
     let mp = (w as f64 * h as f64) / 1_000_000.0;
     if mp < 0.5 {
-        4
+        3
     } else if mp < 2.0 {
         4
     } else if mp < 8.0 {
-        3
+        5
     } else {
-        3
+        4
     }
 }
 
@@ -675,8 +675,12 @@ fn intensity_to_alpha(i: u8) -> f64 {
 
 /// Feature-point alpha. Pixel-domain spread spectrum with mean-centered
 /// correlation needs higher alpha than DWT-domain (which has zero-mean HL).
-fn fp_alpha(i: u8) -> f64 {
-    (intensity_to_alpha(i) * 4.0).max(8.0)
+/// Floor scales with image size: small images tolerate less modification
+/// (every pixel counts visually), large images can absorb more.
+fn fp_alpha(i: u8, w: u32, h: u32) -> f64 {
+    let mp = (w as f64 * h as f64) / 1_000_000.0;
+    let floor = if mp < 1.0 { 4.0 } else { 8.0 };
+    (intensity_to_alpha(i) * 4.0).max(floor)
 }
 
 fn extract_channel(img: &DynamicImage) -> Vec<Vec<f64>> {

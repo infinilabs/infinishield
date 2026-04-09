@@ -60,12 +60,16 @@ The raster engine automatically selects between two modes:
 
 ### Auto Intensity
 
-| Image Size | Auto Intensity | fp_alpha |
-|-----------|:--------------:|:--------:|
-| < 0.5 MP | 7 | max(3.5×4, 8) = 28 |
-| 0.5–2 MP | 5 | max(2.5×4, 8) = 10 |
-| 2–8 MP | 4 | max(2.0×4, 8) = 8 |
-| > 8 MP | 3 | max(1.5×4, 8) = 8 |
+The auto-intensity system balances watermark invisibility against extraction reliability. The `fp_alpha` floor adapts to image size: small images use a lower floor (4.0) because every pixel modification is more visible, while large images use a higher floor (8.0) to ensure reliable extraction across more area. With 200 keypoints doing inter-patch majority voting, small images can afford lower per-pixel alpha without sacrificing detection confidence.
+
+| Image Size | Auto Intensity | fp_alpha floor | Effective fp_alpha |
+|-----------|:--------------:|:--------------:|:------------------:|
+| < 0.5 MP | 3 | 4.0 | max(1.5×4, 4) = 6.0 |
+| 0.5–2 MP | 4 | 4.0 | max(2.0×4, 4) = 8.0 |
+| 2–8 MP | 5 | 8.0 | max(2.5×4, 8) = 10.0 |
+| > 8 MP | 4 | 8.0 | max(2.0×4, 8) = 8.0 |
+
+The `fp_alpha` floor threshold is 1.0 megapixels: images below 1 MP get floor=4.0, images at or above get floor=8.0. Users can override auto-intensity with `--intensity 1..10`; the floor still applies based on image size.
 
 ### Why Pixel-Domain Instead of DWT-on-Patch
 
