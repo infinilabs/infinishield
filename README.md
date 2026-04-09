@@ -1,5 +1,7 @@
 # infinishield
 
+[English](README.md) | [简体中文](README_cn.md)
+
 [![Build](https://github.com/infinilabs/infinishield/actions/workflows/build.yml/badge.svg)](https://github.com/infinilabs/infinishield/actions/workflows/build.yml)
 
 A command-line tool for embedding invisible watermarks into images, SVGs, and videos.
