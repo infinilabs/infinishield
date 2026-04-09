@@ -651,11 +651,11 @@ fn no_detection() -> ExtractResult {
 fn auto_intensity(w: u32, h: u32) -> u8 {
     let mp = (w as f64 * h as f64) / 1_000_000.0;
     if mp < 0.5 {
-        7
-    } else if mp < 2.0 {
-        5
-    } else if mp < 8.0 {
         4
+    } else if mp < 2.0 {
+        4
+    } else if mp < 8.0 {
+        3
     } else {
         3
     }
