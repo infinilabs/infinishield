@@ -1,8 +1,12 @@
 [package]
 name = "infinishield"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Invisible robust watermarking system for multimedia files"
+
+[features]
+default = []
+video = ["dep:ffmpeg-next", "dep:nalgebra"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -15,6 +19,10 @@ rustfft = "6.4.1"
 sha2 = "0.10"
 tiny-skia-path = "0.12.0"
 usvg = "0.47.0"
+
+# Video support (optional) — builds FFmpeg from source, statically linked
+ffmpeg-next = { version = "7", features = ["build", "build-license-gpl", "build-lib-x264"], optional = true }
+nalgebra = { version = "0.33", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

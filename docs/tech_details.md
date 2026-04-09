@@ -9,7 +9,7 @@ infinishield CLI
   │
   ├── RasterEngine (JPEG/PNG/WebP/BMP/TIFF/GIF)
   ├── VectorEngine (SVG)
-  └── VideoEngine  (planned)
+  └── VideoEngine  (MP4/WebM/MOV/AVI/MKV via ffmpeg-next, statically linked)
   │
   Common Layer: ECC, ChaCha20 scrambling, SHA256 password hashing,
                 TempInputForInference managed buffer
@@ -34,7 +34,7 @@ src/
 ├── vector/
 │   └── mod.rs                       # VectorEngine: SVG coordinate QIM watermarking
 └── video/
-    └── mod.rs                       # Stub (Phase 3)
+    └── mod.rs                       # VideoEngine: keyframe watermarking via ffmpeg-next + RasterEngine
 ```
 
 ## Raster Engine
@@ -109,6 +109,71 @@ This design ensures the scramble permutation is stable regardless of which paths
 2. **usvg tree modification:** `usvg` normalizes coordinate formats during parse, making text-level replacement impossible with parsed data.
 3. **Non-power-of-2 Q (0.04):** `0.04` has infinite binary representation in IEEE 754, causing `%` (modulo) to produce wrong extraction results.
 
+## Video Engine
+
+### Architecture
+
+The video engine uses `ffmpeg-next` (statically linked via the `build` feature) for in-memory frame processing. No external ffmpeg binary needed at runtime.
+
+**Pipeline (single-pass streaming, O(1) memory):**
+1. **Read** a packet from the input container
+2. **If video:** decode → convert to RGB → conditionally watermark via `RasterEngine::embed_buffer` (in-memory, zero disk I/O) → convert back to YUV → encode with H.264 → write to output
+3. **If audio:** copy packet directly to output (same loop, no second pass)
+4. **Repeat** until EOF, then flush decoder and encoder
+
+Only 1-2 frames are held in memory at any time. Videos of any length can be processed.
+
+**Why RasterEngine per-keyframe (not raw 3D-SVD):**
+
+The spec mandated 3D-SVD (8×8×8 spatiotemporal blocks, nalgebra SVD, modify singular values). We implemented and tested three approaches:
+
+1. **3D-SVD on singular values + MPEG4:** SVD modifies singular values of the flattened 64×8 matrix. After MPEG4 re-encoding, DCT quantization destroys the SVD modifications. Result: 0% extraction.
+
+2. **3D-SVD on singular values + H.264 CRF 18:** Same SVD approach but with H.264. Only 8 singular values per block (min(64,8)=8) → max 8 bits per block → 0 bytes of usable message (8 bits = 1-byte header only). Increasing block temporal depth or using multiple SVs per bit doesn't help because the 8-bit capacity limit is fundamental to the matrix dimensions.
+
+3. **Temporal spread spectrum + H.264:** One bit per spatial position (64 bits per block), spread across 8 temporal frames. The codec's DCT quantization on individual frames destroys the per-pixel temporal modifications. Result: 0% extraction even with alpha=25.
+
+4. **RasterEngine per-keyframe + H.264:** The proven spatial spread spectrum (8×8 pixel blocks, mean-centered correlation) applied to individual keyframes. This works because the 8×8 block size aligns with the codec's DCT processing. H.264 CRF 18 preserves enough of the spatial watermark for reliable detection.
+
+**Bottom line:** Codec compression is a DCT-based spatial operation. Only spatial watermarking techniques that align with the codec's block structure survive re-encoding. Temporal or SVD-domain modifications get destroyed because they don't map to the codec's processing domain.
+
+**H.264 requirement:** `libx264-dev` must be installed at build time. The `build-lib-x264` feature in ffmpeg-sys-next does NOT compile x264 from source — it links against the system-installed library, which then gets statically linked into the final binary.
+
+### Build Requirements
+
+Video support is behind a cargo feature flag. Default builds exclude it entirely:
+
+```toml
+# Cargo.toml
+[features]
+video = ["dep:ffmpeg-next", "dep:nalgebra"]
+
+[dependencies]
+ffmpeg-next = { version = "7", features = ["build", "build-license-gpl", "build-lib-x264"], optional = true }
+nalgebra = { version = "0.33", optional = true }
+```
+
+System build tools needed: `nasm`, `pkg-config`, `gcc`, `make`, `libx264-dev`.
+
+### Supported Formats
+
+| Container | Decode | Encode |
+|-----------|--------|--------|
+| MP4 | Yes | Yes (H.264) |
+| WebM | Yes | Yes (H.264) |
+| MOV | Yes | Yes (H.264) |
+| AVI | Yes | Yes (H.264) |
+| MKV | Yes | Yes (H.264) |
+
+Output is H.264 encoded via libx264 (CRF 18). Requires `libx264-dev` at build time.
+
+### Limitations
+
+- H.264 re-encoding may cause minor bit errors on complex scenes (detection is reliable, exact byte recovery is not always guaranteed)
+- Message limit: 7 bytes (same as raster feature-point mode)
+- Temporal trim may lose watermark if all watermarked keyframes are trimmed away
+- Audio is stream-copied (codec compatibility depends on output container)
+
 ## Common Layer
 
 ### TempInputForInference
@@ -131,8 +196,9 @@ ChaCha20-seeded Fisher-Yates shuffle. The password is hashed via SHA256 to produ
 | Unit tests | 37 | DWT round-trip, QIM, scramble, ECC, PN generation, parsing, confidence |
 | Raster integration | 24 | 4 images × multiple configs, cropping (25%/50%), auto/explicit intensity, long messages |
 | SVG integration | 16 | 10 SVG files, wrong password, unwatermarked, too-simple, element deletion, viewBox change |
+| Video integration | 13 | 3 original + 6 generated videos (720p/1080p/60fps/portrait/VP9/MKV), wrong password, custom message, temporal trim, dry-run |
 | Doc tests | 1 | TempInputForInference usage example |
-| **Total** | **78** | |
+| **Total** | **91** | |
 
 ## Dependencies
 
@@ -148,4 +214,7 @@ ChaCha20-seeded Fisher-Yates shuffle. The password is hashed via SHA256 to produ
 | `rustfft` | Yes | FFT (available for future use) |
 | `num-complex` | Yes | Complex number arithmetic |
 
-All dependencies are pure Rust — no system libraries required.
+| `ffmpeg-next` | No (C FFmpeg) | Video decode/encode, statically linked (optional, `video` feature) |
+| `nalgebra` | Yes | Matrix operations (optional, `video` feature) |
+
+Core dependencies are pure Rust. The `video` feature adds `ffmpeg-next` which builds FFmpeg + libx264 from source during `cargo build` and statically links them — no runtime dependencies needed.

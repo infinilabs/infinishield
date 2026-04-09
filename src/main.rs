@@ -4,6 +4,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use infinishield::common::WatermarkEngine;
 use infinishield::raster::RasterEngine;
 use infinishield::vector::VectorEngine;
+#[cfg(feature = "video")]
+use infinishield::video::VideoEngine;
 
 #[derive(Parser)]
 #[command(name = "infinishield")]
@@ -91,8 +93,14 @@ fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
             Ok(Box::new(RasterEngine))
         }
         "svg" => Ok(Box::new(VectorEngine)),
+        #[cfg(feature = "video")]
+        "mp4" | "webm" | "mov" | "avi" | "mkv" => Ok(Box::new(VideoEngine)),
+        #[cfg(not(feature = "video"))]
+        "mp4" | "webm" | "mov" | "avi" | "mkv" => Err(
+            "Video support not enabled. Rebuild with: cargo build --features video".to_string(),
+        ),
         _ => Err(format!(
-            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif, svg",
+            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif, svg, mp4, webm, mov, avi, mkv",
             ext
         )),
     }

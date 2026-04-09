@@ -2,107 +2,107 @@
 
 [![Build](https://github.com/infinilabs/infinishield/actions/workflows/build.yml/badge.svg)](https://github.com/infinilabs/infinishield/actions/workflows/build.yml)
 
-A command-line tool for embedding invisible watermarks into images and SVG files.
+A command-line tool for embedding invisible watermarks into images, SVGs, and videos.
 
 ## What It Does
 
-infinishield hides a short text message (e.g., a copyright notice) inside an image or SVG file. The watermark is:
-
-- **Invisible** — no visible changes to the file
-- **Password-protected** — only someone with the password can extract it
-- **Cropping-resistant** — survives partial image cropping (for short messages)
+infinishield hides a short text message (e.g., a copyright notice) inside a file. The watermark is invisible, password-protected, and survives common modifications like cropping and compression.
 
 ## Supported Formats
 
-| Format | Status |
-|--------|--------|
-| JPEG, PNG, WebP, BMP, TIFF, GIF | Supported |
-| SVG | Supported |
-| MP4, WebM (video) | Planned |
+| Format | Status | Max Message |
+|--------|--------|:-----------:|
+| JPEG, PNG, WebP, BMP, TIFF, GIF | Supported | 7 bytes (cropping-resistant) or ~40 bytes (longer, no crop protection) |
+| SVG | Supported | 2-7 bytes (depends on path complexity) |
+| MP4, WebM, MOV, AVI, MKV | Supported (optional build) | 7 bytes |
 
 ## Building
 
 Requires [Rust](https://rustup.rs/) 1.70+.
 
 ```bash
-make release    # Build optimized binary
+make release          # Images + SVG only
+make release-video    # Images + SVG + Video (see below)
 ```
 
-The binary will be at `target/release/infinishield`. Run `make help` to see all available commands.
+### Video Support (optional)
+
+Video requires extra system packages and takes longer to build (compiles FFmpeg from source):
+
+```bash
+# Linux (Debian/Ubuntu)
+sudo apt-get install nasm pkg-config gcc make libx264-dev
+
+# macOS
+brew install nasm pkg-config x264
+
+# Then build
+make release-video
+```
 
 ## Usage
 
-### Embed a Watermark
+### Embed
 
 ```bash
-# Simplest — embeds default message "Infini" with default password
-infinishield embed -i photo.jpg -o watermarked.png
-
-# Custom message and password
-infinishield embed -i photo.jpg -m "MyMark" -p "secret" -o watermarked.png
-
-# SVG file
-infinishield embed -i logo.svg -o logo_wm.svg -m "Hi"
-
-# Preview without writing (dry run)
-infinishield embed -i photo.jpg -o out.png --dry-run
+infinishield embed -i photo.jpg -o watermarked.png                      # image
+infinishield embed -i logo.svg -o logo_wm.svg -m "Hi"                   # SVG
+infinishield embed -i clip.mp4 -o watermarked.mp4                       # video
+infinishield embed -i photo.jpg -m "MyMark" -p "secret" -o out.png      # custom message + password
+infinishield embed -i photo.jpg -o out.png --dry-run                    # preview only
 ```
 
 | Option | Required | Default | Description |
 |--------|----------|---------|-------------|
 | `-i` | yes | — | Input file |
-| `-o` | yes | — | Output file (PNG recommended for images) |
-| `-m` | no | `"Infini"` | Message to hide (max 7 bytes for cropping resistance) |
+| `-o` | yes | — | Output file |
+| `-m` | no | `"Infini"` | Message to embed |
 | `-p` | no | `"d1ng0"` | Password |
-| `--intensity` | no | auto | Embedding strength (1-10, images only) |
-| `--dry-run` | no | — | Show info without writing output |
+| `--intensity` | no | auto | Strength 1-10 (images only) |
+| `--dry-run` | no | — | Preview without writing |
 
-### Verify / Extract
+### Verify
 
 ```bash
-# Check if a file contains a watermark
 infinishield verify -i watermarked.png
-
-# With a specific password
 infinishield verify -i watermarked.png -p "secret"
-```
-
-Example output:
-```
-[验证结果] 匹配成功！(置信度: 99.3%)
-[提取内容] "Infini"
 ```
 
 ### Help
 
 ```bash
-infinishield              # Show full help
-infinishield --version    # Show version
+infinishield              # full help
+infinishield --version    # version
 ```
 
-## Limitations
+## Best Practices for Preparing Assets
 
-**Images:**
-- Messages up to 7 bytes survive cropping. Longer messages work but lose cropping protection.
-- Rotation and resizing are not supported — only cropping and compression.
-- Saving as JPEG degrades the watermark. Use PNG for best results.
+**Images (JPEG/PNG):**
+- Use PNG output (`-o out.png`) for best watermark preservation. JPEG output is lossy and degrades the watermark.
+- Messages up to 7 bytes (e.g., `"Infini"`) survive cropping. For longer messages, cropping protection is lost.
+- Images should be at least 512×512 pixels. Larger images work better.
+- Rotation and resizing will destroy the watermark — only cropping and compression are tolerated.
 
 **SVG:**
-- Only works on SVGs with complex paths. Simple shapes (rectangles, circles) have too few coordinates.
-- Message capacity is typically 2-7 bytes depending on SVG complexity.
-- SVG editors that reformat coordinates may destroy the watermark.
+- Works best on SVGs with complex paths (illustrations, icons with curves). Simple geometric shapes (plain rectangles, circles) have too few coordinates to embed.
+- Use `--dry-run` first to check if your SVG has enough qualifying paths.
+- Don't open the watermarked SVG in editors that reformat or round coordinate values — this destroys the watermark. View-only or programmatic use is safe.
 
-**General:**
-- Video support is planned but not yet available.
+**Video:**
+- Keep messages short (≤ 7 bytes). The watermark is embedded in 1 keyframe per second.
+- Output is re-encoded with H.264 (CRF 18). The original codec is not preserved.
+- On some videos with complex scenes, 1-2 bits of the message may flip during re-encoding. Detection is reliable but exact message recovery is not always guaranteed.
+- Streaming architecture — only 1-2 frames in memory at a time. Handles videos of any length.
+- The video binary includes a statically linked FFmpeg — no runtime dependencies needed.
 
 ## Running Tests
 
 ```bash
-make test       # All tests (debug)
-make sanity     # Full check: format + lint + build + all tests
-make clean      # Remove build artifacts and test outputs
+make test       # Images + SVG tests
+make sanity     # Full check: format + lint + build + all tests (including video)
+make clean      # Remove build artifacts
 ```
 
 ## Documentation
 
-- [Technical Details](docs/tech_details.md) — architecture, algorithms, design decisions
+- [Technical Details](docs/tech_details.md) — architecture, algorithms, what works and what doesn't

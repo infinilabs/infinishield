@@ -153,6 +153,166 @@ impl WatermarkEngine for RasterEngine {
     }
 }
 
+// ── In-Memory Buffer API (for VideoEngine) ───────────────────────────────
+//
+// These methods work on raw RGB byte buffers, avoiding file I/O entirely.
+// The file-based WatermarkEngine methods above are NOT modified.
+
+impl RasterEngine {
+    /// Embed a watermark into a raw RGB buffer in-place.
+    /// `rgb` is width × height × 3 bytes in row-major order.
+    /// Modifies the green channel of `rgb` directly.
+    pub fn embed_buffer(
+        &self,
+        rgb: &mut [u8],
+        width: u32,
+        height: u32,
+        message: &str,
+        password: &str,
+        intensity: u8,
+    ) -> Result<(), String> {
+        let intensity = resolve_intensity(intensity, width, height);
+        let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
+        let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
+        let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
+
+        let use_fp = kps.len() >= MIN_KEYPOINTS && message.len() <= FP_MAX_MESSAGE;
+
+        if use_fp {
+            let mut ch = channel;
+            let alpha = fp_alpha(intensity);
+            let encoded_bits = fp_encode(message.as_bytes())?;
+            let seed = password::password_to_seed(password);
+            let perm = scramble::generate_permutation(encoded_bits.len(), &seed);
+            let scrambled = scramble::scramble(&encoded_bits, &perm);
+
+            let ch_h = ch.len();
+            let ch_w = if ch_h > 0 { ch[0].len() } else { 0 };
+            let mut ctx = TempInputForInference::with_block_size(FP_BLOCK_SIZE, FP_BLOCK_SIZE);
+            ctx.set_seed(seed);
+            let half = (PATCH_SIZE / 2) as i64;
+            let bpr = PATCH_SIZE / FP_BLOCK_SIZE;
+
+            for kp in &kps {
+                let kx = kp.x as i64;
+                let ky = kp.y as i64;
+                for (bit_idx, &bit) in scrambled.iter().enumerate() {
+                    let br = bit_idx / bpr;
+                    let bc = bit_idx % bpr;
+                    let signal = if bit { 1.0 } else { -1.0 };
+                    ctx.generate_pn_chip(bit_idx);
+                    let pn = ctx.pn_buffer().to_vec();
+                    for i in 0..FP_BLOCK_SIZE {
+                        for j in 0..FP_BLOCK_SIZE {
+                            let py = ky - half + (br * FP_BLOCK_SIZE + i) as i64;
+                            let px = kx - half + (bc * FP_BLOCK_SIZE + j) as i64;
+                            if py >= 0 && px >= 0 && (py as usize) < ch_h && (px as usize) < ch_w {
+                                ch[py as usize][px as usize] +=
+                                    alpha * pn[i * FP_BLOCK_SIZE + j] * signal;
+                            }
+                        }
+                    }
+                }
+            }
+            write_channel_to_rgb(rgb, &ch, width, height, EMBED_CHANNEL);
+        } else {
+            // Global DWT mode — fully in-memory, no temp files
+            let mut coeffs = dwt::forward(&channel);
+            let (br, bc, nb) = count_blocks(coeffs.hl.len(), coeffs.hl[0].len());
+            if nb == 0 {
+                return Err("Image too small for watermarking".to_string());
+            }
+            let bits = ecc::encode(message.as_bytes(), nb)?;
+            let seed = password::password_to_seed(password);
+            let perm = scramble::generate_permutation(bits.len(), &seed);
+            let scrambled = scramble::scramble(&bits, &perm);
+            let alpha = intensity_to_alpha(intensity);
+            let mut ctx = TempInputForInference::new(GLOBAL_BLOCK_SIZE);
+            ctx.set_seed(seed);
+            for (i, &bit) in scrambled.iter().enumerate() {
+                let r = i / bc;
+                let c = i % bc;
+                if r >= br {
+                    break;
+                }
+                ctx.generate_pn_chip(i);
+                ctx.load_patch(
+                    &coeffs.hl,
+                    r * GLOBAL_BLOCK_SIZE,
+                    c * GLOBAL_BLOCK_SIZE,
+                    GLOBAL_BLOCK_SIZE,
+                    GLOBAL_BLOCK_SIZE,
+                );
+                ctx.embed_spread_spectrum(0, bit, alpha);
+                ctx.store_patch(
+                    &mut coeffs.hl,
+                    r * GLOBAL_BLOCK_SIZE,
+                    c * GLOBAL_BLOCK_SIZE,
+                    GLOBAL_BLOCK_SIZE,
+                    GLOBAL_BLOCK_SIZE,
+                );
+            }
+            let wm = dwt::inverse(&coeffs);
+            write_channel_to_rgb(rgb, &wm, width, height, EMBED_CHANNEL);
+        }
+        Ok(())
+    }
+
+    /// Verify/extract a watermark from a raw RGB buffer.
+    pub fn verify_buffer(
+        &self,
+        rgb: &[u8],
+        width: u32,
+        height: u32,
+        password: &str,
+    ) -> Result<ExtractResult, String> {
+        let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
+        let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
+        let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
+
+        if kps.len() >= MIN_KEYPOINTS {
+            let fp = verify_feature_point(&kps, password, &channel)?;
+            if fp.detected {
+                return Ok(fp);
+            }
+        }
+        verify_global_dwt_from_channel(&channel, password)
+    }
+}
+
+/// Extract a single channel from raw RGB bytes as f64 matrix.
+fn channel_from_rgb(rgb: &[u8], w: u32, h: u32, ch_idx: usize) -> Vec<Vec<f64>> {
+    let mut ch = vec![vec![0.0; w as usize]; h as usize];
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            ch[y][x] = rgb[(y * w as usize + x) * 3 + ch_idx] as f64;
+        }
+    }
+    ch
+}
+
+/// Build a GrayImage from a specific channel of raw RGB bytes.
+fn gray_from_rgb(rgb: &[u8], w: u32, h: u32, ch_idx: usize) -> GrayImage {
+    let mut g = GrayImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let idx = ((y * w + x) * 3) as usize + ch_idx;
+            g.put_pixel(x, y, Luma([rgb[idx]]));
+        }
+    }
+    g
+}
+
+/// Write a modified f64 channel back to raw RGB bytes.
+fn write_channel_to_rgb(rgb: &mut [u8], ch: &[Vec<f64>], w: u32, h: u32, ch_idx: usize) {
+    let w = w as usize;
+    for (y, row) in ch.iter().enumerate().take(h as usize) {
+        for (x, val) in row.iter().enumerate().take(w) {
+            rgb[(y * w + x) * 3 + ch_idx] = val.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
 // ── Feature-Point Pipeline ───────────────────────────────────────────────
 //
 // Per keypoint:

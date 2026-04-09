@@ -1,15 +1,21 @@
-.PHONY: all build debug release test test-unit test-integration test-release sanity clean fmt lint check help
+.PHONY: all build debug release debug-video release-video test test-unit test-integration test-video test-release sanity clean fmt lint check help
 
 # Default target
 all: debug
 
 # ── Build ─────────────────────────────────────────────────────────────────
 
-debug: ## Build debug mode
+debug: ## Build debug mode (images + SVG only)
 	cargo build
 
-release: ## Build release mode
+release: ## Build release mode (images + SVG only)
 	cargo build --release
+
+debug-video: ## Build debug mode with video support (requires nasm, gcc, pkg-config)
+	cargo build --features video
+
+release-video: ## Build release mode with video support
+	cargo build --release --features video
 
 build: debug release ## Build both debug and release
 
@@ -18,13 +24,16 @@ build: debug release ## Build both debug and release
 test-unit: ## Run unit tests (debug)
 	cargo test --lib
 
-test-integration: ## Run integration tests with real images and SVGs (debug)
+test-integration: ## Run integration tests for images and SVGs (debug)
 	cargo test --test picture_tests
 	cargo test --test svg_tests
 
-test: test-unit test-integration ## Run all tests (debug)
+test-video: ## Run video integration tests (requires video feature + ffmpeg)
+	cargo test --features video --test video_tests
 
-test-release: ## Run all tests (release)
+test: test-unit test-integration ## Run all non-video tests (debug)
+
+test-release: ## Run all non-video tests (release)
 	cargo test --release
 
 # ── Code Quality ──────────────────────────────────────────────────────────
@@ -35,15 +44,16 @@ fmt: ## Format code
 fmt-check: ## Check formatting without modifying
 	cargo fmt -- --check
 
-lint: ## Run clippy lints
+lint: ## Run clippy lints (both default and video)
 	cargo clippy -- -D warnings
+	cargo clippy --features video -- -D warnings
 
 check: ## Type-check without building
 	cargo check
 
 # ── Sanity ────────────────────────────────────────────────────────────────
 
-sanity: fmt-check lint debug test-unit test-integration release test-release ## Full build + lint + all tests (debug & release)
+sanity: fmt-check lint debug test-unit test-integration release test-release debug-video test-video ## Full check (default + video)
 	@echo ""
 	@echo "========================================="
 	@echo " All sanity checks passed."
@@ -51,7 +61,7 @@ sanity: fmt-check lint debug test-unit test-integration release test-release ## 
 
 # ── Clean ─────────────────────────────────────────────────────────────────
 
-clean: ## Remove build artifacts, test outputs, and testing_output directory
+clean: ## Remove build artifacts and test outputs
 	cargo clean
 	rm -rf testing_output
 
