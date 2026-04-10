@@ -73,7 +73,7 @@ pub fn detect_keypoints(gray: &GrayImage, max_keypoints: usize) -> Vec<FeaturePo
 /// Extract a PATCH_SIZE × PATCH_SIZE patch from a grayscale image centered on a keypoint,
 /// rotated to canonical orientation (orientation angle removed).
 ///
-/// Returns the patch as a Vec<f64> in row-major order.
+/// Returns the patch as a `Vec<f64>` in row-major order.
 pub fn extract_normalized_patch(gray: &GrayImage, kp: &FeaturePoint) -> Vec<f64> {
     // Extract a larger region to account for rotation (diagonal of patch)
     let extract_radius = (HALF_PATCH as f64 * std::f64::consts::SQRT_2).ceil() as u32 + 2;
