@@ -105,11 +105,12 @@ input:focus,select:focus{border-color:var(--accent)}
     </div>
   </div>
 
-  <div id="embed-result" style="display:none">
+  <div id="embed-result" style="display:none; margin-top:24px; padding-top:24px; border-top:1px solid var(--border)">
+    <h2 style="font-size:1.2rem; margin-bottom:16px;">Result</h2>
     <div class="output-panel has-content" id="embed-output"></div>
     <div class="comparison" id="embed-comparison"></div>
     <div style="margin-top:16px">
-      <button class="btn btn-primary" id="reset-btn">New Embed</button>
+      <button class="btn btn-primary" id="reset-btn">Start Over (New File)</button>
     </div>
   </div>
 </div>
@@ -317,7 +318,6 @@ document.getElementById('embed-btn').addEventListener('click', async () => {
     const data = await res.json();
 
     form.classList.remove('locked');
-    form.style.display = 'none';
     document.getElementById('embed-result').style.display = 'block';
     document.getElementById('embed-output').textContent = data.output || data.error;
 
@@ -356,13 +356,16 @@ document.getElementById('embed-btn').addEventListener('click', async () => {
 });
 
 document.getElementById('reset-btn').addEventListener('click', () => {
-  document.getElementById('embed-form').style.display = 'block';
   document.getElementById('embed-result').style.display = 'none';
   document.getElementById('embed-comparison').textContent = '';
   document.getElementById('embed-preview').style.display = 'none';
   document.getElementById('embed-preview').textContent = '';
   document.getElementById('embed-upload-info').style.display = 'none';
   document.getElementById('embed-btn').disabled = true;
+  document.getElementById('embed-file').value = '';
+  document.getElementById('dryrun-output').textContent = 'Upload a file to see dry-run preview';
+  document.getElementById('dryrun-output').classList.remove('has-content');
+  setIndicator('idle', 'Dry-run idle');
   embedFilePath = null;
   embedFileName = null;
 });
