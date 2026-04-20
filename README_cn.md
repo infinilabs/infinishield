@@ -107,6 +107,9 @@ infinishield --version    # 版本信息
 make webapp     # 构建并运行在 http://localhost:1983
 ```
 
+![Debug UI 1](misc/debug_ui_1.png)
+![Debug UI 2](misc/debug_ui_2.png)
+
 功能特点：
 - 上传要加水印的图像、SVG 或视频
 - 配置消息、密码和强度，提供实时的 dry-run 预览

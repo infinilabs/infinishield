@@ -108,6 +108,9 @@ A browser-based testing interface for embedding and verifying watermarks. Requir
 make webapp     # Build + run on http://localhost:1983
 ```
 
+![Debug UI 1](misc/debug_ui_1.png)
+![Debug UI 2](misc/debug_ui_2.png)
+
 Features:
 - Upload images, SVGs, or videos for watermarking
 - Configure message, password, and intensity with real-time dry-run preview
