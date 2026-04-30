@@ -207,20 +207,36 @@ fn try_extract(svg: &str, seed: [u8; 32], actual_bits: usize) -> Option<ExtractR
 
 // ── SVG Text-Level Processing ────────────────────────────────────────────
 
-/// Find all `d="..."` attribute values in the SVG text.
-fn find_path_d_attrs(svg: &str) -> Vec<String> {
+/// Find all `d="..."` attribute positions in the SVG text.
+/// Returns a vector of (start_index, end_index) matching the interior of the quotes.
+fn find_path_d_positions(svg: &str) -> Vec<(usize, usize)> {
     let mut results = Vec::new();
-    let pattern = " d=\"";
-    let mut search_from = 0;
+    let bytes = svg.as_bytes();
+    let mut i = 0;
 
-    while let Some(start) = svg[search_from..].find(pattern) {
-        let attr_start = search_from + start + pattern.len();
-        if let Some(end) = svg[attr_start..].find('"') {
-            results.push(svg[attr_start..attr_start + end].to_string());
+    while i + 3 < bytes.len() {
+        // Match any whitespace followed by d="
+        if bytes[i].is_ascii_whitespace() && bytes[i + 1] == b'd' && bytes[i + 2] == b'=' && bytes[i + 3] == b'"' {
+            let attr_start = i + 4;
+            if let Some(end) = svg[attr_start..].find('"') {
+                results.push((attr_start, attr_start + end));
+                i = attr_start + end + 1;
+            } else {
+                break;
+            }
+        } else {
+            i += 1;
         }
-        search_from = attr_start;
     }
     results
+}
+
+/// Find all `d="..."` attribute values in the SVG text.
+fn find_path_d_attrs(svg: &str) -> Vec<String> {
+    find_path_d_positions(svg)
+        .into_iter()
+        .map(|(start, end)| svg[start..end].to_string())
+        .collect()
 }
 
 /// Count paths that have at least `min_coords` numeric values.
@@ -289,25 +305,13 @@ fn parse_numbers(d: &str) -> Vec<(f64, usize, usize)> {
 
 /// Embed watermark into all qualifying paths in the SVG text.
 fn embed_in_svg(svg: &str, scrambled: &[bool], seed: [u8; 32]) -> Result<(String, usize), String> {
-    let pattern = " d=\"";
     let mut num_paths = 0;
 
     // Pre-generate all PN values
     let pn_values: Vec<f64> = (0..scrambled.len()).map(|i| generate_pn(seed, i)).collect();
 
     // Collect all (attr_start, attr_end) positions first
-    let d_positions: Vec<(usize, usize)> = {
-        let mut positions = Vec::new();
-        let mut search_from = 0;
-        while let Some(start) = svg[search_from..].find(pattern) {
-            let attr_start = search_from + start + pattern.len();
-            if let Some(end) = svg[attr_start..].find('"') {
-                positions.push((attr_start, attr_start + end));
-            }
-            search_from = attr_start + 1;
-        }
-        positions
-    };
+    let d_positions = find_path_d_positions(svg);
 
     // Build result using a single pass with collected replacements
     let mut replacements: Vec<(usize, usize, String)> = Vec::new();
@@ -536,6 +540,66 @@ mod tests {
         assert_eq!(nums.len(), 4);
         assert_eq!(nums[0].0, -10.5);
         assert_eq!(nums[1].0, -20.3);
+    }
+
+    #[test]
+    fn test_parse_numbers_scientific_notation() {
+        let d = "M 1.5e3 2E-4 L 3.0e+2 -1e1";
+        let nums = parse_numbers(d);
+        assert_eq!(nums.len(), 4);
+        assert!((nums[0].0 - 1500.0).abs() < 0.01);
+        assert!((nums[1].0 - 0.0002).abs() < 0.0001);
+        assert!((nums[2].0 - 300.0).abs() < 0.01);
+        assert!((nums[3].0 - (-10.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_numbers_implicit_separator() {
+        // SVG allows "100-50" to mean "100, -50"
+        let d = "M100-50L200-100";
+        let nums = parse_numbers(d);
+        assert_eq!(nums.len(), 4);
+        assert_eq!(nums[0].0, 100.0);
+        assert_eq!(nums[1].0, -50.0);
+        assert_eq!(nums[2].0, 200.0);
+        assert_eq!(nums[3].0, -100.0);
+    }
+
+    #[test]
+    fn test_parse_numbers_empty_path() {
+        assert!(parse_numbers("").is_empty());
+        assert!(parse_numbers("M Z").is_empty());
+    }
+
+    #[test]
+    fn test_parse_numbers_small_values() {
+        let d = "M 0.001 -0.0025";
+        let nums = parse_numbers(d);
+        assert_eq!(nums.len(), 2);
+        assert!((nums[0].0 - 0.001).abs() < 1e-6);
+        assert!((nums[1].0 - (-0.0025)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_find_path_d_attrs_whitespace_variants() {
+        // Tab before d=
+        let svg = "<svg><path\td=\"M 0 0 L 10 10\"/></svg>";
+        assert_eq!(find_path_d_attrs(svg).len(), 1);
+
+        // Newline directly before d=
+        let svg = "<svg><path\nd=\"M 5 5 L 15 15\"/></svg>";
+        assert_eq!(find_path_d_attrs(svg).len(), 1);
+
+        // Carriage return before d=
+        let svg = "<svg><path\rd=\"M 0 0 L 10 10\"/></svg>";
+        assert_eq!(find_path_d_attrs(svg).len(), 1);
+
+        // No paths
+        assert!(find_path_d_attrs("<svg></svg>").is_empty());
+
+        // Multiple paths with mixed whitespace
+        let svg = "<svg><path d=\"M 0 0\"/><path\td=\"M 1 1\"/></svg>";
+        assert_eq!(find_path_d_attrs(svg).len(), 2);
     }
 
     #[test]
