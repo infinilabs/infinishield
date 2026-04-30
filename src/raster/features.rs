@@ -4,7 +4,7 @@
 //! Each keypoint provides a position and orientation angle, allowing patches to be
 //! extracted and rotated to a canonical orientation for embedding/extraction.
 
-use image::{GrayImage, Luma};
+use image::GrayImage;
 use imageproc::corners::{oriented_fast, OrientedFastCorner};
 
 /// Size of the square patch extracted around each keypoint.
@@ -14,7 +14,7 @@ pub const PATCH_SIZE: usize = 64;
 const HALF_PATCH: u32 = PATCH_SIZE as u32 / 2;
 
 /// Minimum distance from image edge for a keypoint to be usable.
-/// Must be at least HALF_PATCH to extract a full patch, plus margin for rotation.
+/// Must be at least HALF_PATCH to extract a full patch, plus safety margin.
 const EDGE_MARGIN: u32 = HALF_PATCH + 8;
 
 /// A detected feature point with its position, orientation, and response strength.
@@ -69,23 +69,10 @@ pub fn detect_keypoints(gray: &GrayImage, max_keypoints: usize) -> Vec<FeaturePo
     points
 }
 
-/// Extract a PATCH_SIZE × PATCH_SIZE patch from a grayscale image centered on a keypoint,
-/// rotated to canonical orientation (orientation angle removed).
-///
-/// Returns the patch as a `Vec<f64>` in row-major order.
-
-/// Write a modified patch back to the image at the keypoint location,
-/// reversing the canonical rotation. `mask` is an optional Gaussian blending
-/// mask (same size as patch) with values 0.0-1.0.
-
-/// Generate a circular Gaussian blending mask for a PATCH_SIZE × PATCH_SIZE patch.
-///
-/// Center pixels have weight 1.0, edges fall off smoothly to 0.0.
-/// This prevents visible seams when blending watermarked patches back.
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::Luma;
 
     #[test]
     fn test_detect_keypoints_small_image() {

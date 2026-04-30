@@ -103,7 +103,6 @@ impl WatermarkEngine for RasterEngine {
     ) -> Result<EmbedResult, String> {
         let img = image::open(input_path).map_err(|e| format!("Failed to open image: {}", e))?;
         let (info, use_fp) = analyze(&img, message, intensity, output_path)?;
-        let ri = info.intensity;
         let gray = channel_to_gray(&img);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
 
@@ -111,7 +110,7 @@ impl WatermarkEngine for RasterEngine {
             // Pass raw intensity (0=auto) so fp_alpha uses smooth log curve
             embed_feature_point(&img, &kps, message, password, intensity, output_path)?;
         } else {
-            embed_global_dwt(&img, message, password, ri, output_path)?;
+            embed_global_dwt(&img, message, password, intensity, output_path)?;
         }
         Ok(EmbedResult {
             message: info.summary(),
@@ -172,8 +171,6 @@ impl RasterEngine {
         password: &str,
         intensity: u8,
     ) -> Result<(), String> {
-        let raw_intensity = intensity; // preserve for fp_alpha (0 = auto)
-        let resolved = resolve_intensity(intensity, width, height);
         let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
         let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
@@ -182,7 +179,7 @@ impl RasterEngine {
 
         if use_fp {
             let mut ch = channel;
-            let alpha = fp_alpha(raw_intensity, width, height);
+            let alpha = fp_alpha(intensity, width, height);
             let encoded_bits = fp_encode(message.as_bytes())?;
             let seed = password::password_to_seed(password);
             let perm = scramble::generate_permutation(encoded_bits.len(), &seed);
@@ -231,7 +228,7 @@ impl RasterEngine {
             let seed = password::password_to_seed(password);
             let perm = scramble::generate_permutation(bits.len(), &seed);
             let scrambled = scramble::scramble(&bits, &perm);
-            let alpha = intensity_to_alpha(resolved);
+            let alpha = dwt_alpha(intensity, width, height);
             let mut ctx = TempInputForInference::new(GLOBAL_BLOCK_SIZE);
             ctx.set_seed(seed);
             for (i, &bit) in scrambled.iter().enumerate() {
@@ -425,11 +422,11 @@ fn embed_feature_point(
     keypoints: &[FeaturePoint],
     message: &str,
     password: &str,
-    intensity: u8,
+    raw_intensity: u8,
     output_path: &str,
 ) -> Result<(), String> {
     let (width, height) = img.dimensions();
-    let alpha = fp_alpha(intensity, width, height);
+    let alpha = fp_alpha(raw_intensity, width, height);
 
     let encoded_bits = fp_encode(message.as_bytes())?;
     let seed = password::password_to_seed(password);
@@ -581,11 +578,11 @@ fn embed_global_dwt(
     img: &DynamicImage,
     message: &str,
     password: &str,
-    intensity: u8,
+    raw_intensity: u8,
     output_path: &str,
 ) -> Result<(), String> {
-    let alpha = intensity_to_alpha(intensity);
     let (w, h) = img.dimensions();
+    let alpha = dwt_alpha(raw_intensity, w, h);
     let ch = extract_channel(img);
     let mut coeffs = dwt::forward(&ch);
     let (br, bc, nb) = count_blocks(coeffs.hl.len(), coeffs.hl[0].len());
@@ -704,15 +701,9 @@ fn no_detection() -> ExtractResult {
 
 fn auto_intensity(w: u32, h: u32) -> u8 {
     let mp = (w as f64 * h as f64) / 1_000_000.0;
-    if mp < 0.5 {
-        3
-    } else if mp < 2.0 {
-        4
-    } else if mp < 8.0 {
-        5
-    } else {
-        4
-    }
+    let mp = mp.max(0.1);
+    let raw = 3.5 + 0.72 * mp.ln();
+    raw.round().clamp(2.0, 8.0) as u8
 }
 
 fn resolve_intensity(i: u8, w: u32, h: u32) -> u8 {
@@ -721,10 +712,6 @@ fn resolve_intensity(i: u8, w: u32, h: u32) -> u8 {
     } else {
         i.clamp(1, 10)
     }
-}
-
-fn intensity_to_alpha(i: u8) -> f64 {
-    0.5 + (i as f64 - 1.0) * 0.5
 }
 
 /// Feature-point alpha using a smooth logarithmic curve.
@@ -756,6 +743,33 @@ fn fp_alpha(raw_intensity: u8, w: u32, h: u32) -> f64 {
         // This ensures the HVS log curve scales safely for any image size.
         let multiplier = 0.5 + (raw_intensity as f64 - 1.0) * (1.5 / 9.0);
         (log_alpha * multiplier).clamp(1.0, 25.0)
+    }
+}
+
+/// DWT alpha using a smooth logarithmic curve (parallel to fp_alpha).
+///
+/// For auto mode (raw_intensity == 0):
+///   alpha = 2.0 + 0.36 * ln(mp), clamped to [1.0, 4.0]
+///   Anchored at 1 MP → 2.0; monotonically increasing with image size.
+///
+/// For manual mode (raw_intensity 1-10):
+///   Size-aware scaling: multiplier = 0.5 + (intensity - 1) * (1.5 / 9)
+///   alpha = log_alpha * multiplier, clamped to [0.5, 8.0]
+///
+/// Grounded in the same spread-spectrum SNR theory as fp_alpha:
+/// larger images have more coefficients to spread the watermark over,
+/// tolerating higher alpha while remaining imperceptible.
+fn dwt_alpha(raw_intensity: u8, w: u32, h: u32) -> f64 {
+    let mp = (w as f64 * h as f64) / 1_000_000.0;
+    let mp = mp.max(0.1);
+
+    let log_alpha = (2.0 + 0.36 * mp.ln()).clamp(1.0, 4.0);
+
+    if raw_intensity == 0 {
+        log_alpha
+    } else {
+        let multiplier = 0.5 + (raw_intensity as f64 - 1.0) * (1.5 / 9.0);
+        (log_alpha * multiplier).clamp(0.5, 8.0)
     }
 }
 
@@ -818,6 +832,56 @@ fn save_channel_to_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dwt_alpha_auto_monotonic() {
+        // Alpha must increase with image size (no >8MP regression)
+        let sizes = [(256, 256), (512, 512), (1024, 768), (1920, 1080), (3840, 2160), (7680, 4320)];
+        let alphas: Vec<f64> = sizes.iter().map(|&(w, h)| dwt_alpha(0, w, h)).collect();
+        for i in 1..alphas.len() {
+            assert!(alphas[i] >= alphas[i - 1],
+                "dwt_alpha must be monotonic: {}x{} ({:.2}) < {}x{} ({:.2})",
+                sizes[i-1].0, sizes[i-1].1, alphas[i-1],
+                sizes[i].0, sizes[i].1, alphas[i]);
+        }
+    }
+
+    #[test]
+    fn test_dwt_alpha_manual_size_aware() {
+        // Same intensity should produce higher alpha on larger images
+        let small = dwt_alpha(5, 512, 512);
+        let large = dwt_alpha(5, 3840, 2160);
+        assert!(large > small);
+    }
+
+    #[test]
+    fn test_auto_intensity_monotonic() {
+        let sizes = [(256, 256), (1024, 768), (1920, 1080), (3840, 2160)];
+        let intensities: Vec<u8> = sizes.iter().map(|&(w, h)| auto_intensity(w, h)).collect();
+        for i in 1..intensities.len() {
+            assert!(intensities[i] >= intensities[i - 1],
+                "auto_intensity must be monotonic");
+        }
+    }
+
+    #[test]
+    fn test_fp_alpha_auto_monotonic() {
+        let sizes = [(256, 256), (512, 512), (1024, 768), (1920, 1080), (3840, 2160), (7680, 4320)];
+        let alphas: Vec<f64> = sizes.iter().map(|&(w, h)| fp_alpha(0, w, h)).collect();
+        for i in 1..alphas.len() {
+            assert!(alphas[i] >= alphas[i - 1],
+                "fp_alpha must be monotonic: {}x{} ({:.2}) < {}x{} ({:.2})",
+                sizes[i-1].0, sizes[i-1].1, alphas[i-1],
+                sizes[i].0, sizes[i].1, alphas[i]);
+        }
+    }
+
+    #[test]
+    fn test_fp_alpha_manual_size_aware() {
+        let small = fp_alpha(5, 512, 512);
+        let large = fp_alpha(5, 3840, 2160);
+        assert!(large > small);
+    }
 
     #[test]
     fn test_fp_encode_decode() {
