@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use infinishield::common::WatermarkEngine;
+use infinishield::common::{WatermarkEngine, WatermarkError};
 use infinishield::raster::RasterEngine;
 use infinishield::vector::VectorEngine;
 #[cfg(feature = "video")]
@@ -81,7 +81,7 @@ enum Commands {
 }
 
 /// Detect file format and return the appropriate engine.
-fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
+fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, infinishield::common::WatermarkError> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -96,13 +96,8 @@ fn engine_for_file(path: &str) -> Result<Box<dyn WatermarkEngine>, String> {
         #[cfg(feature = "video")]
         "mp4" | "webm" | "mov" | "avi" | "mkv" => Ok(Box::new(VideoEngine)),
         #[cfg(not(feature = "video"))]
-        "mp4" | "webm" | "mov" | "avi" | "mkv" => Err(
-            "Video support not enabled. Rebuild with: cargo build --features video".to_string(),
-        ),
-        _ => Err(format!(
-            "Unsupported file format: .{}. Supported: jpg, jpeg, png, webp, bmp, tiff, gif, svg, mp4, webm, mov, avi, mkv",
-            ext
-        )),
+        "mp4" | "webm" | "mov" | "avi" | "mkv" => Err(WatermarkError::VideoNotEnabled.into()),
+        _ => Err(WatermarkError::UnsupportedFormat { extension: ext.to_string() }.into()),
     }
 }
 
@@ -180,7 +175,7 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[错误] {}", e);
-                        std::process::exit(1);
+                    std::process::exit(1);
                     }
                 }
             } else {
@@ -190,7 +185,7 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[错误] {}", e);
-                        std::process::exit(1);
+                    std::process::exit(1);
                     }
                 }
             }

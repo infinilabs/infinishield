@@ -34,17 +34,13 @@ impl WatermarkEngine for VectorEngine {
         password: &str,
         _intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedResult, String> {
+    ) -> Result<EmbedResult, crate::common::WatermarkError> {
         if message.len() > SVG_MAX_MESSAGE {
-            return Err(format!(
-                "Message too long for SVG: max {} bytes, got {}",
-                SVG_MAX_MESSAGE,
-                message.len()
-            ));
+            return Err(crate::common::WatermarkError::CapacityExceeded { max: SVG_MAX_MESSAGE, actual: message.len(), mode: "vector-qim" });
         }
 
         let svg =
-            std::fs::read_to_string(input_path).map_err(|e| format!("Failed to read: {}", e))?;
+            std::fs::read_to_string(input_path)?;
 
         // Bit count is determined by MESSAGE SIZE, not path structure.
         // This ensures the scramble permutation is the same regardless of
@@ -54,10 +50,7 @@ impl WatermarkEngine for VectorEngine {
 
         let qualifying = count_qualifying_paths(&svg, actual_bits);
         if qualifying == 0 {
-            return Err(format!(
-                "SVG has no paths with ≥{} coordinates for this message",
-                actual_bits
-            ));
+            return Err(crate::common::WatermarkError::NoQualifyingPaths { min_coords: actual_bits });
         }
 
         let bits = svg_encode_n(message.as_bytes(), actual_bits)?;
@@ -67,7 +60,7 @@ impl WatermarkEngine for VectorEngine {
 
         let (modified, num_paths) = embed_in_svg(&svg, &scrambled, seed)?;
 
-        std::fs::write(output_path, &modified).map_err(|e| format!("Failed to write: {}", e))?;
+        std::fs::write(output_path, &modified)?;
 
         let info = EmbedInfo {
             status: "ok".to_string(),
@@ -95,23 +88,19 @@ impl WatermarkEngine for VectorEngine {
         _password: &str,
         _intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedInfo, String> {
+    ) -> Result<EmbedInfo, crate::common::WatermarkError> {
         if message.len() > SVG_MAX_MESSAGE {
-            return Err(format!(
-                "Message too long: {} bytes, max: {} (mode: vector-qim)",
-                message.len(),
-                SVG_MAX_MESSAGE
-            ));
+            return Err(crate::common::WatermarkError::CapacityExceeded { max: SVG_MAX_MESSAGE, actual: message.len(), mode: "vector-qim" });
         }
 
         let svg =
-            std::fs::read_to_string(input_path).map_err(|e| format!("Failed to read: {}", e))?;
+            std::fs::read_to_string(input_path)?;
 
         let msg_bits = (message.len() + 1) * 8;
         let qualifying = count_qualifying_paths(&svg, msg_bits.min(MAX_COORDS));
 
         if qualifying == 0 {
-            return Err("SVG has no qualifying paths for this message".to_string());
+            return Err(crate::common::WatermarkError::NoQualifyingPaths { min_coords: 0 });
         }
 
         Ok(EmbedInfo {
@@ -128,9 +117,9 @@ impl WatermarkEngine for VectorEngine {
         })
     }
 
-    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, String> {
+    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, crate::common::WatermarkError> {
         let svg =
-            std::fs::read_to_string(input_path).map_err(|e| format!("Failed to read: {}", e))?;
+            std::fs::read_to_string(input_path)?;
 
         let seed = password::password_to_seed(password);
 
@@ -304,7 +293,7 @@ fn parse_numbers(d: &str) -> Vec<(f64, usize, usize)> {
 }
 
 /// Embed watermark into all qualifying paths in the SVG text.
-fn embed_in_svg(svg: &str, scrambled: &[bool], seed: [u8; 32]) -> Result<(String, usize), String> {
+fn embed_in_svg(svg: &str, scrambled: &[bool], seed: [u8; 32]) -> Result<(String, usize), crate::common::WatermarkError> {
     let mut num_paths = 0;
 
     // Pre-generate all PN values
@@ -341,7 +330,7 @@ fn embed_in_svg(svg: &str, scrambled: &[bool], seed: [u8; 32]) -> Result<(String
     }
 
     if num_paths == 0 {
-        return Err("SVG has no qualifying paths".to_string());
+        return Err(crate::common::WatermarkError::NoQualifyingPaths { min_coords: 0 });
     }
 
     // Apply replacements in reverse order to preserve offsets
@@ -399,14 +388,10 @@ fn generate_pn(seed: [u8; 32], idx: usize) -> f64 {
 
 // ── Message Encoding ─────────────────────────────────────────────────────
 
-fn svg_encode_n(message: &[u8], total_bits: usize) -> Result<Vec<bool>, String> {
+fn svg_encode_n(message: &[u8], total_bits: usize) -> Result<Vec<bool>, crate::common::WatermarkError> {
     let payload_bytes = total_bits.div_ceil(8);
     if payload_bytes == 0 || message.len() + 1 > payload_bytes {
-        return Err(format!(
-            "Message too long: max {} bytes, got {}",
-            payload_bytes.saturating_sub(1),
-            message.len()
-        ));
+        return Err(crate::common::WatermarkError::CapacityExceeded { max: payload_bytes.saturating_sub(1), actual: message.len(), mode: "svg" });
     }
     let mut payload = vec![0u8; payload_bytes];
     payload[0] = message.len() as u8;
@@ -422,9 +407,9 @@ fn svg_encode_n(message: &[u8], total_bits: usize) -> Result<Vec<bool>, String> 
     Ok(bits)
 }
 
-fn svg_decode(bits: &[bool]) -> Result<Vec<u8>, String> {
+fn svg_decode(bits: &[bool]) -> Result<Vec<u8>, crate::common::WatermarkError> {
     if bits.len() < 8 {
-        return Err("Not enough bits".to_string());
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
     let mut bytes = Vec::with_capacity(bits.len() / 8);
     for chunk in bits.chunks(8) {
@@ -441,7 +426,7 @@ fn svg_decode(bits: &[bool]) -> Result<Vec<u8>, String> {
     }
     let len = bytes[0] as usize;
     if len == 0 || 1 + len > bytes.len() {
-        return Err("Invalid message length".to_string());
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
     Ok(bytes[1..1 + len].to_vec())
 }

@@ -99,8 +99,46 @@ pub struct ExtractResult {
 ///
 /// Each engine implements format-specific feature detection and embedding
 /// while sharing the common layer (ECC, scrambling, password hashing).
+use std::io;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum WatermarkError {
+    #[error(transparent)]
+    Image(#[from] image::ImageError),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
+
+    #[error("message exceeds capacity: {actual} bytes, max {max} bytes (mode: {mode})")]
+    CapacityExceeded {
+        max: usize,
+        actual: usize,
+        mode: &'static str,
+    },
+
+    #[error("image too small for watermarking: insufficient DWT coefficients")]
+    ImageTooSmall,
+
+    #[error("unsupported file format: .{extension}")]
+    UnsupportedFormat { extension: String },
+
+    #[error("no qualifying SVG paths with >= {min_coords} coordinates")]
+    NoQualifyingPaths { min_coords: usize },
+
+    #[error("extraction failed: corrupt or missing watermark data")]
+    ExtractionCorrupt,
+
+    #[error("video support not enabled; rebuild with: cargo build --features video")]
+    VideoNotEnabled,
+
+    #[error("video processing failed: {0}")]
+    VideoProcessing(String),
+
+}
+
 pub trait WatermarkEngine {
-    /// Embed a watermark message into a file.
+    /// Embed a watermark into a file.
     fn embed(
         &self,
         input_path: &str,
@@ -108,7 +146,7 @@ pub trait WatermarkEngine {
         password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedResult, String>;
+    ) -> Result<EmbedResult, WatermarkError>;
 
     /// Dry run: compute embedding info without writing any file.
     fn dry_run(
@@ -118,8 +156,8 @@ pub trait WatermarkEngine {
         password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedInfo, String>;
+    ) -> Result<EmbedInfo, WatermarkError>;
 
     /// Verify and extract a watermark from a file.
-    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, String>;
+    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, WatermarkError>;
 }

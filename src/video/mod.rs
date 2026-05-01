@@ -25,6 +25,7 @@ use crate::raster::RasterEngine;
 use ffmpeg::format::Pixel;
 use ffmpeg::software::scaling::{context::Context as ScalerCtx, flag::Flags as ScalerFlags};
 use ffmpeg::util::frame::video::Video;
+use crate::common::WatermarkError;
 use ffmpeg::{codec, encoder, format, media, picture, Dictionary, Packet, Rational};
 
 use std::collections::HashMap;
@@ -41,14 +42,10 @@ impl WatermarkEngine for VideoEngine {
         password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedResult, String> {
-        ffmpeg::init().map_err(|e| format!("FFmpeg init: {}", e))?;
+    ) -> Result<EmbedResult, WatermarkError> {
+        ffmpeg::init().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         if message.len() > VIDEO_MAX_MESSAGE {
-            return Err(format!(
-                "Message too long: max {} bytes, got {}",
-                VIDEO_MAX_MESSAGE,
-                message.len()
-            ));
+            return Err(WatermarkError::CapacityExceeded { max: VIDEO_MAX_MESSAGE, actual: message.len(), mode: "video" });
         }
 
         let wm_count = streaming_transcode(
@@ -82,17 +79,13 @@ impl WatermarkEngine for VideoEngine {
         _password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedInfo, String> {
-        ffmpeg::init().map_err(|e| format!("FFmpeg init: {}", e))?;
+    ) -> Result<EmbedInfo, WatermarkError> {
+        ffmpeg::init().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         if message.len() > VIDEO_MAX_MESSAGE {
-            return Err(format!(
-                "Message too long: {} bytes, max: {}",
-                message.len(),
-                VIDEO_MAX_MESSAGE
-            ));
+            return Err(WatermarkError::CapacityExceeded { max: VIDEO_MAX_MESSAGE, actual: message.len(), mode: "video" });
         }
-        let ictx = format::input(input_path).map_err(|e| format!("Open: {}", e))?;
-        let _vs = ictx.streams().best(media::Type::Video).ok_or("No video")?;
+        let ictx = format::input(input_path).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
+        let _vs = ictx.streams().best(media::Type::Video).ok_or(WatermarkError::VideoProcessing("No video".to_string()))?;
         let dur = ictx.duration() as f64 / ffmpeg::ffi::AV_TIME_BASE as f64;
 
         Ok(EmbedInfo {
@@ -109,18 +102,18 @@ impl WatermarkEngine for VideoEngine {
         })
     }
 
-    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, String> {
-        ffmpeg::init().map_err(|e| format!("FFmpeg init: {}", e))?;
+    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, WatermarkError> {
+        ffmpeg::init().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
-        let mut ictx = format::input(input_path).map_err(|e| format!("Open: {}", e))?;
-        let vs = ictx.streams().best(media::Type::Video).ok_or("No video")?;
+        let mut ictx = format::input(input_path).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
+        let vs = ictx.streams().best(media::Type::Video).ok_or(WatermarkError::VideoProcessing("No video".to_string()))?;
         let vi = vs.index();
         let fps = f64::from(vs.avg_frame_rate()).max(1.0);
         let interval = (fps.round() as usize).max(1);
 
         let ctx = ffmpeg::codec::context::Context::from_parameters(vs.parameters())
-            .map_err(|e| e.to_string())?;
-        let mut dec = ctx.decoder().video().map_err(|e| e.to_string())?;
+            .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
+        let mut dec = ctx.decoder().video().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         let w = dec.width();
         let h = dec.height();
 
@@ -133,18 +126,18 @@ impl WatermarkEngine for VideoEngine {
             h,
             ScalerFlags::BILINEAR,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
         let raster = RasterEngine;
         let mut detected: Vec<(String, f64)> = Vec::new();
         let mut frame_idx = 0usize;
 
-        let mut process = |d: &mut ffmpeg::decoder::Video| -> Result<(), String> {
+        let mut process = |d: &mut ffmpeg::decoder::Video| -> Result<(), WatermarkError> {
             let mut decoded = Video::empty();
             while d.receive_frame(&mut decoded).is_ok() {
                 if frame_idx % interval == 0 {
                     let mut rgb = Video::empty();
-                    scaler.run(&decoded, &mut rgb).map_err(|e| e.to_string())?;
+                    scaler.run(&decoded, &mut rgb).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
                     let buf = frame_to_rgb_vec(&rgb, w, h);
                     if let Ok(r) = raster.verify_buffer(&buf, w, h, password) {
                         if r.detected {
@@ -161,11 +154,11 @@ impl WatermarkEngine for VideoEngine {
 
         for (stream, packet) in ictx.packets() {
             if stream.index() == vi {
-                dec.send_packet(&packet).map_err(|e| e.to_string())?;
+                dec.send_packet(&packet).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
                 process(&mut dec)?;
             }
         }
-        dec.send_eof().map_err(|e| e.to_string())?;
+        dec.send_eof().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         process(&mut dec)?;
 
         if detected.is_empty() {
@@ -198,20 +191,20 @@ fn streaming_transcode(
     input_path: &str,
     output_path: &str,
     watermark: Option<(&str, &str, u8)>,
-) -> Result<usize, String> {
-    let mut ictx = format::input(input_path).map_err(|e| format!("Input: {}", e))?;
-    let mut octx = format::output(output_path).map_err(|e| format!("Output: {}", e))?;
+) -> Result<usize, WatermarkError> {
+    let mut ictx = format::input(input_path).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
+    let mut octx = format::output(output_path).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
     // Video stream setup
-    let video_ist = ictx.streams().best(media::Type::Video).ok_or("No video")?;
+    let video_ist = ictx.streams().best(media::Type::Video).ok_or(WatermarkError::VideoProcessing("No video".to_string()))?;
     let video_idx = video_ist.index();
     let fps = f64::from(video_ist.avg_frame_rate()).max(1.0);
     let interval = (fps.round() as usize).max(1);
     let video_tb = video_ist.time_base();
 
     let dec_ctx = ffmpeg::codec::context::Context::from_parameters(video_ist.parameters())
-        .map_err(|e| e.to_string())?;
-    let mut decoder = dec_ctx.decoder().video().map_err(|e| e.to_string())?;
+        .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
+    let mut decoder = dec_ctx.decoder().video().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
     let w = decoder.width();
     let h = decoder.height();
 
@@ -222,13 +215,13 @@ fn streaming_transcode(
     let video_ost_idx;
     let mut video_enc;
     {
-        let mut ost = octx.add_stream(enc_codec).map_err(|e| e.to_string())?;
+        let mut ost = octx.add_stream(enc_codec).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         let mut e = codec::context::Context::new_with_codec(
-            enc_codec.ok_or("H264 not found. Install libx264-dev.")?,
+            enc_codec.ok_or(WatermarkError::VideoProcessing("H264 not found. Install libx264-dev.".to_string()))?,
         )
         .encoder()
         .video()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
         ost.set_parameters(&e);
         e.set_width(w);
@@ -242,7 +235,7 @@ fn streaming_transcode(
         let mut opts = Dictionary::new();
         opts.set("preset", "medium");
         opts.set("crf", "18");
-        video_enc = e.open_with(opts).map_err(|e| e.to_string())?;
+        video_enc = e.open_with(opts).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
         ost.set_parameters(&video_enc);
         video_ost_idx = ost.index();
     }
@@ -253,7 +246,7 @@ fn streaming_transcode(
         if ist.parameters().medium() == media::Type::Audio {
             let mut ost = octx
                 .add_stream(encoder::find(codec::Id::None))
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
             ost.set_parameters(ist.parameters());
             unsafe {
                 (*ost.parameters().as_mut_ptr()).codec_tag = 0;
@@ -263,7 +256,7 @@ fn streaming_transcode(
         }
     }
 
-    octx.write_header().map_err(|e| e.to_string())?;
+    octx.write_header().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
     let video_ost_tb = octx.stream(video_ost_idx).unwrap().time_base();
     let audio_ost_tb = audio_map.map(|(_, ao)| octx.stream(ao).unwrap().time_base());
@@ -278,7 +271,7 @@ fn streaming_transcode(
         h,
         ScalerFlags::BILINEAR,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
     let mut to_yuv = ScalerCtx::get(
         Pixel::RGB24,
@@ -289,7 +282,7 @@ fn streaming_transcode(
         h,
         ScalerFlags::BILINEAR,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
     let raster = RasterEngine;
     let mut frame_idx = 0usize;
@@ -303,11 +296,11 @@ fn streaming_transcode(
     let mut process_decoded = |dec: &mut ffmpeg::decoder::Video,
                                enc: &mut encoder::Video,
                                out: &mut format::context::Output|
-     -> Result<(), String> {
+     -> Result<(), WatermarkError> {
         let mut decoded = Video::empty();
         while dec.receive_frame(&mut decoded).is_ok() {
             let mut rgb = Video::empty();
-            to_rgb.run(&decoded, &mut rgb).map_err(|e| e.to_string())?;
+            to_rgb.run(&decoded, &mut rgb).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
 
             // Conditionally watermark this frame
             if let Some((msg, pwd, intensity)) = watermark {
@@ -324,16 +317,16 @@ fn streaming_transcode(
             }
 
             let mut yuv = Video::empty();
-            to_yuv.run(&rgb, &mut yuv).map_err(|e| e.to_string())?;
+            to_yuv.run(&rgb, &mut yuv).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
             yuv.set_pts(Some(frame_idx as i64));
             yuv.set_kind(picture::Type::None);
 
-            enc.send_frame(&yuv).map_err(|e| e.to_string())?;
+            enc.send_frame(&yuv).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
             let mut pkt = Packet::empty();
             while enc.receive_packet(&mut pkt).is_ok() {
                 pkt.set_stream(video_ost_idx);
                 pkt.rescale_ts(video_tb, video_ost_tb);
-                pkt.write_interleaved(out).map_err(|e| e.to_string())?;
+                pkt.write_interleaved(out).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
             }
             frame_idx += 1;
         }
@@ -345,7 +338,7 @@ fn streaming_transcode(
         let idx = stream.index();
 
         if idx == video_idx {
-            decoder.send_packet(&packet).map_err(|e| e.to_string())?;
+            decoder.send_packet(&packet).map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
             process_decoded(&mut decoder, &mut video_enc, &mut octx)?;
         } else if let Some((ai, ao)) = audio_map {
             if idx == ai {
@@ -360,19 +353,19 @@ fn streaming_transcode(
     }
 
     // Flush
-    decoder.send_eof().map_err(|e| e.to_string())?;
+    decoder.send_eof().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
     process_decoded(&mut decoder, &mut video_enc, &mut octx)?;
 
-    video_enc.send_eof().map_err(|e| e.to_string())?;
+    video_enc.send_eof().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
     let mut pkt = Packet::empty();
     while video_enc.receive_packet(&mut pkt).is_ok() {
         pkt.set_stream(video_ost_idx);
         pkt.rescale_ts(video_tb, video_ost_tb);
         pkt.write_interleaved(&mut octx)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
     }
 
-    octx.write_trailer().map_err(|e| e.to_string())?;
+    octx.write_trailer().map_err(|e| WatermarkError::VideoProcessing(e.to_string()))?;
     Ok(wm_count)
 }
 

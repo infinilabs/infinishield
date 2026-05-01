@@ -23,6 +23,7 @@ usvg = "0.47.0"
 # Video support (optional) — builds FFmpeg from source, statically linked
 ffmpeg-next = { version = "7", features = ["build", "build-license-gpl", "build-lib-x264"], optional = true }
 nalgebra = { version = "0.33", optional = true }
+thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"

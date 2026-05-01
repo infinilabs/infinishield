@@ -30,17 +30,13 @@ pub fn total_encoded_bits(num_blocks: usize) -> usize {
 /// A 2-byte length header (big-endian u16) is prepended. The payload is
 /// zero-padded to fill the full capacity so that the encoded bit length
 /// is always `total_encoded_bits(num_blocks)`.
-pub fn encode(message: &[u8], num_blocks: usize) -> Result<Vec<bool>, String> {
+pub fn encode(message: &[u8], num_blocks: usize) -> Result<Vec<bool>, crate::common::WatermarkError> {
     let max_msg = max_message_bytes(num_blocks);
     if max_msg == 0 {
-        return Err("Image too small: insufficient capacity".to_string());
+        return Err(crate::common::WatermarkError::ImageTooSmall);
     }
     if message.len() > max_msg {
-        return Err(format!(
-            "Message too long: max {} bytes, got {} bytes",
-            max_msg,
-            message.len()
-        ));
+        return Err(crate::common::WatermarkError::CapacityExceeded { max: max_msg, actual: message.len(), mode: "global-dwt" });
     }
 
     let total_data_bits = num_blocks / REPETITION_FACTOR;
@@ -76,9 +72,9 @@ pub fn encode(message: &[u8], num_blocks: usize) -> Result<Vec<bool>, String> {
 ///
 /// `bits` should contain the raw extracted bits (scrambled order already resolved).
 /// Returns the decoded message bytes.
-pub fn decode(bits: &[bool]) -> Result<Vec<u8>, String> {
+pub fn decode(bits: &[bool]) -> Result<Vec<u8>, crate::common::WatermarkError> {
     if bits.len() < REPETITION_FACTOR * 16 {
-        return Err("Not enough data to decode (need at least 2 header bytes)".to_string());
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
 
     // Majority vote to recover original bits
@@ -112,21 +108,17 @@ pub fn decode(bits: &[bool]) -> Result<Vec<u8>, String> {
 
     // Read length header
     if bytes.len() < 2 {
-        return Err("Decoded data too short".to_string());
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
     let msg_len = ((bytes[0] as u16) << 8) | (bytes[1] as u16);
     let msg_len = msg_len as usize;
 
     if msg_len == 0 {
-        return Err("Invalid message length: 0".to_string());
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
 
     if 2 + msg_len > bytes.len() {
-        return Err(format!(
-            "Message length {} exceeds available data {}",
-            msg_len,
-            bytes.len() - 2
-        ));
+        return Err(crate::common::WatermarkError::ExtractionCorrupt);
     }
 
     Ok(bytes[2..2 + msg_len].to_vec())

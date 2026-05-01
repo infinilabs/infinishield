@@ -949,6 +949,7 @@ dependencies = [
  "rustfft",
  "sha2",
  "tempfile",
+ "thiserror",
  "tiny-skia-path",
  "usvg",
 ]

@@ -3,7 +3,7 @@ pub mod features;
 
 use crate::common::engine::{EmbedInfo, EmbedResult, ExtractResult, WatermarkEngine};
 use crate::common::temp_input_for_inference::TempInputForInference;
-use crate::common::{ecc, password, scramble};
+use crate::common::{WatermarkError, ecc, password, scramble};
 
 use features::{detect_keypoints, FeaturePoint, PATCH_SIZE};
 use image::{DynamicImage, GenericImageView, GrayImage, Luma};
@@ -57,7 +57,7 @@ fn analyze(
     message: &str,
     intensity: u8,
     output_path: &str,
-) -> Result<(EmbedInfo, bool), String> {
+) -> Result<(EmbedInfo, bool), crate::common::WatermarkError> {
     let (w, h) = img.dimensions();
     let intensity = resolve_intensity(intensity, w, h);
     let gray = channel_to_gray(img);
@@ -100,8 +100,8 @@ impl WatermarkEngine for RasterEngine {
         password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedResult, String> {
-        let img = image::open(input_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    ) -> Result<EmbedResult, WatermarkError> {
+        let img = image::open(input_path)?;
         let (info, use_fp) = analyze(&img, message, intensity, output_path)?;
         let gray = channel_to_gray(&img);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
@@ -125,20 +125,17 @@ impl WatermarkEngine for RasterEngine {
         _password: &str,
         intensity: u8,
         output_path: &str,
-    ) -> Result<EmbedInfo, String> {
-        let img = image::open(input_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    ) -> Result<EmbedInfo, WatermarkError> {
+        let img = image::open(input_path)?;
         let (info, _) = analyze(&img, message, intensity, output_path)?;
         if info.message_bytes > info.max_capacity {
-            return Err(format!(
-                "Message too long: {} bytes, max capacity: {} bytes (mode: {})",
-                info.message_bytes, info.max_capacity, info.mode
-            ));
+            return Err(WatermarkError::CapacityExceeded { max: info.max_capacity, actual: info.message_bytes, mode: "global-dwt" });
         }
         Ok(info)
     }
 
-    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, String> {
-        let img = image::open(input_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    fn verify(&self, input_path: &str, password: &str) -> Result<ExtractResult, WatermarkError> {
+        let img = image::open(input_path)?;
         let gray = channel_to_gray(&img);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
         let channel = extract_channel(&img);
@@ -170,7 +167,7 @@ impl RasterEngine {
         message: &str,
         password: &str,
         intensity: u8,
-    ) -> Result<(), String> {
+    ) -> Result<(), WatermarkError> {
         let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
         let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
@@ -222,7 +219,7 @@ impl RasterEngine {
             let mut coeffs = dwt::forward(&channel);
             let (br, bc, nb) = count_blocks(coeffs.hl.len(), coeffs.hl[0].len());
             if nb == 0 {
-                return Err("Image too small for watermarking".to_string());
+                return Err(WatermarkError::ImageTooSmall);
             }
             let bits = ecc::encode(message.as_bytes(), nb)?;
             let seed = password::password_to_seed(password);
@@ -267,7 +264,7 @@ impl RasterEngine {
         width: u32,
         height: u32,
         password: &str,
-    ) -> Result<ExtractResult, String> {
+    ) -> Result<ExtractResult, WatermarkError> {
         let gray = gray_from_rgb(rgb, width, height, DETECT_CHANNEL);
         let kps = detect_keypoints(&gray, MAX_KEYPOINTS);
         let channel = channel_from_rgb(rgb, width, height, EMBED_CHANNEL);
@@ -371,13 +368,9 @@ fn calculate_local_alpha(
     global_alpha * multiplier
 }
 
-fn fp_encode(message: &[u8]) -> Result<Vec<bool>, String> {
+fn fp_encode(message: &[u8]) -> Result<Vec<bool>, WatermarkError> {
     if message.len() > FP_MAX_MESSAGE {
-        return Err(format!(
-            "Message too long for feature-point mode: max {} bytes, got {}",
-            FP_MAX_MESSAGE,
-            message.len()
-        ));
+        return Err(WatermarkError::CapacityExceeded { max: FP_MAX_MESSAGE, actual: message.len(), mode: "feature-point" });
     }
     let total_bytes = BLOCKS_PER_PATCH / 8;
     let mut payload = vec![0u8; total_bytes];
@@ -393,9 +386,9 @@ fn fp_encode(message: &[u8]) -> Result<Vec<bool>, String> {
     Ok(bits)
 }
 
-fn fp_decode(bits: &[bool]) -> Result<Vec<u8>, String> {
+fn fp_decode(bits: &[bool]) -> Result<Vec<u8>, WatermarkError> {
     if bits.len() < 8 {
-        return Err("Not enough bits".to_string());
+        return Err(WatermarkError::ExtractionCorrupt);
     }
     let mut bytes = Vec::with_capacity(bits.len() / 8);
     for chunk in bits.chunks(8) {
@@ -412,7 +405,7 @@ fn fp_decode(bits: &[bool]) -> Result<Vec<u8>, String> {
     }
     let len = bytes[0] as usize;
     if len == 0 || 1 + len > bytes.len() {
-        return Err("Invalid message length".to_string());
+        return Err(WatermarkError::ExtractionCorrupt);
     }
     Ok(bytes[1..1 + len].to_vec())
 }
@@ -424,7 +417,7 @@ fn embed_feature_point(
     password: &str,
     raw_intensity: u8,
     output_path: &str,
-) -> Result<(), String> {
+) -> Result<(), WatermarkError> {
     let (width, height) = img.dimensions();
     let alpha = fp_alpha(raw_intensity, width, height);
 
@@ -478,7 +471,7 @@ fn verify_feature_point(
     keypoints: &[FeaturePoint],
     password: &str,
     channel: &[Vec<f64>],
-) -> Result<ExtractResult, String> {
+) -> Result<ExtractResult, WatermarkError> {
     let seed = password::password_to_seed(password);
     let ch_h = channel.len();
     let ch_w = if ch_h > 0 { channel[0].len() } else { 0 };
@@ -580,14 +573,14 @@ fn embed_global_dwt(
     password: &str,
     raw_intensity: u8,
     output_path: &str,
-) -> Result<(), String> {
+) -> Result<(), WatermarkError> {
     let (w, h) = img.dimensions();
     let alpha = dwt_alpha(raw_intensity, w, h);
     let ch = extract_channel(img);
     let mut coeffs = dwt::forward(&ch);
     let (br, bc, nb) = count_blocks(coeffs.hl.len(), coeffs.hl[0].len());
     if nb == 0 {
-        return Err("Image too small for watermarking".to_string());
+        return Err(WatermarkError::ImageTooSmall);
     }
 
     let bits = ecc::encode(message.as_bytes(), nb)?;
@@ -629,7 +622,7 @@ fn embed_global_dwt(
 fn verify_global_dwt_from_channel(
     channel: &[Vec<f64>],
     password: &str,
-) -> Result<ExtractResult, String> {
+) -> Result<ExtractResult, WatermarkError> {
     let coeffs = dwt::forward(channel);
     let (_, bc, nb) = count_blocks(coeffs.hl.len(), coeffs.hl[0].len());
     if nb == 0 {
@@ -809,7 +802,7 @@ fn save_channel_to_image(
     width: u32,
     height: u32,
     path: &str,
-) -> Result<(), String> {
+) -> Result<(), WatermarkError> {
     let mut out = img.to_rgba8();
     let oh = height.min(channel.len() as u32);
     let ow = width.min(if channel.is_empty() {
@@ -825,8 +818,7 @@ fn save_channel_to_image(
             out.put_pixel(x, y, px);
         }
     }
-    out.save(path)
-        .map_err(|e| format!("Failed to save image: {}", e))
+    Ok(out.save(path)?)
 }
 
 #[cfg(test)]

@@ -241,8 +241,8 @@ fn test_message_too_long() {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("too long") || err.contains("capacity"),
-        "Error should mention capacity: {}",
+        matches!(err, infinishield::common::WatermarkError::CapacityExceeded { .. }),
+        "Expected CapacityExceeded, got: {:?}",
         err
     );
 }
