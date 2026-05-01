@@ -1,6 +1,6 @@
 [package]
 name = "infinishield"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2021"
 description = "Invisible robust watermarking system for multimedia files"
 
